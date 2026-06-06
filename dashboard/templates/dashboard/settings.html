@@ -19,9 +19,29 @@
       <span class="inline-flex items-center gap-1.5"><i data-lucide="alert-triangle" class="h-3.5 w-3.5 shrink-0"></i> Uploading a new CSV will wipe all your current products, transactions and orders.</span>
     </div>
     {% else %}
-    <div class="mb-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
-      No CSV uploaded yet. Required columns:
-      <code class="text-xs">transaction_date, product_name, quantity, final_amount, unit_price</code> (min 10 rows).
+    <div class="mb-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600 space-y-3">
+      <p class="font-medium text-gray-700">No CSV uploaded yet. Two formats are accepted:</p>
+      <div>
+        <p class="text-xs font-semibold text-gray-600 mb-1">Format A — Inventra Native <span class="font-normal text-gray-400">(min 10 rows)</span></p>
+        <div class="flex flex-wrap gap-1.5">
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">transaction_date</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">product_name</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">quantity</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">final_amount</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">unit_price</code>
+        </div>
+      </div>
+      <div>
+        <p class="text-xs font-semibold text-gray-600 mb-1">Format B — UCI Online Retail <span class="font-normal text-gray-400">(auto-detected)</span></p>
+        <div class="flex flex-wrap gap-1.5">
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">InvoiceNo</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">Description</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">Quantity</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">InvoiceDate</code>
+          <code class="rounded bg-white px-2 py-0.5 text-xs ring-1 ring-gray-200">UnitPrice</code>
+        </div>
+        <p class="mt-1 text-xs text-gray-400">541,909 real UK retail transactions — download from the UCI Machine Learning Repository (widely cited in academic DSS research).</p>
+      </div>
     </div>
     {% endif %}
 

@@ -11,8 +11,14 @@ import math
 import numpy as np
 import pandas as pd
 
-# Required columns a user's CSV must contain.
+# Required columns a user's CSV must contain (internal / native format).
 REQUIRED_COLUMNS = ['transaction_date', 'product_name', 'quantity', 'final_amount', 'unit_price']
+
+# UCI Online Retail dataset column signature (subset sufficient for detection).
+_UCI_SIGNATURE = {'InvoiceNo', 'Description', 'Quantity', 'InvoiceDate', 'UnitPrice'}
+
+# UCI rows whose Description starts with these strings are admin/postage, not products.
+_UCI_NOISE_PREFIXES = ('POST', 'DOT', 'CRUK', 'BANK', 'MANUAL', 'AMAZONFEE', 'PADS', 'ADJUST')
 
 # Service-level (%) -> Z score mapping.
 Z_MAP = {90: 1.28, 95: 1.65, 97.5: 1.96, 99: 2.33}
@@ -20,7 +26,6 @@ DEFAULT_Z = 1.65
 
 SES_ALPHAS = [0.2, 0.5, 0.8]
 MA_WINDOW = 4
-STATIC_THRESHOLD = 10  # static reorder policy threshold (units)
 
 HOLDING_RATE = 0.25  # annual holding cost as a fraction of unit price
 
@@ -49,21 +54,69 @@ def z_from_service_level(service_level):
 
 
 # --------------------------------------------------------------------------- #
-# CSV cleaning & validation
+# CSV normalisation & validation
 # --------------------------------------------------------------------------- #
+def normalize_csv_format(df):
+    """
+    Auto-detect and normalise an uploaded CSV to Inventra's internal schema.
+
+    Supports two formats:
+      - Native Inventra  : transaction_date, product_name, quantity,
+                           final_amount, unit_price  (+ optional extras)
+      - UCI Online Retail: InvoiceNo, StockCode, Description, Quantity,
+                           InvoiceDate, UnitPrice, CustomerID, Country
+
+    Returns a dataframe with at least the REQUIRED_COLUMNS present.
+    Non-UCI files are returned unchanged.
+    """
+    if not _UCI_SIGNATURE.issubset(set(df.columns)):
+        return df  # already in native format (or unknown — let validate_csv catch it)
+
+    df = df.copy()
+    df = df.rename(columns={
+        'Description': 'product_name',
+        'InvoiceDate': 'transaction_date',
+        'Quantity':    'quantity',
+        'UnitPrice':   'unit_price',
+    })
+    df['final_amount']    = df['quantity'] * df['unit_price']
+    df['discount_amount'] = 0.0
+    df['store_name']      = df['Country'] if 'Country' in df.columns else 'Online'
+
+    # Remove returns (negative qty), cancelled invoices, and admin/postage rows.
+    df = df[df['quantity'] > 0]
+    df = df[df['unit_price'] > 0]
+    noise = df['product_name'].str.upper().str.startswith(_UCI_NOISE_PREFIXES, na=False)
+    df = df[~noise]
+
+    return df
+
+
 def validate_csv(file_path, min_rows=10):
     """
     Validate an uploaded CSV. Returns (ok: bool, message: str, dataframe_or_None).
-    Checks required columns, parseable dates and a minimum row count.
+    Accepts Inventra native format and UCI Online Retail format (auto-detected).
     """
     try:
-        df = pd.read_csv(file_path)
-    except Exception as exc:  # noqa: BLE001 - surface any parse error to the user
+        df = pd.read_csv(file_path, encoding='utf-8', low_memory=False)
+    except UnicodeDecodeError:
+        try:
+            df = pd.read_csv(file_path, encoding='latin-1', low_memory=False)
+        except Exception as exc:  # noqa: BLE001
+            return False, f"Could not read the CSV file: {exc}", None
+    except Exception as exc:  # noqa: BLE001
         return False, f"Could not read the CSV file: {exc}", None
+
+    df = normalize_csv_format(df)
 
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
-        return False, f"Missing required column(s): {', '.join(missing)}.", None
+        return False, (
+            f"Missing required column(s): {', '.join(missing)}. "
+            "Accepted: Inventra native (transaction_date, product_name, quantity, "
+            "final_amount, unit_price) or UCI Online Retail "
+            "(InvoiceNo, Description, Quantity, InvoiceDate, UnitPrice)."
+        ), None
 
     if len(df) < min_rows:
         return False, f"CSV must contain at least {min_rows} rows of data (found {len(df)}).", None
@@ -111,6 +164,60 @@ def weekly_revenue_series(df_product):
     return df_product.groupby(pd.Grouper(key='transaction_date', freq='W'))['final_amount'].sum()
 
 
+def detect_promotional_weeks(df_product):
+    """
+    Identify calendar weeks with abnormally high discounting.
+
+    A week is flagged as promotional when its total discount_amount exceeds
+    mean + 1 standard deviation across all weeks.  Returns a boolean Series
+    indexed by week-end date.  Returns an all-False series when the
+    discount_amount column is absent or variance is zero.
+    """
+    if 'discount_amount' not in df_product.columns or df_product.empty:
+        return pd.Series(dtype=bool)
+
+    weekly_disc = (
+        df_product
+        .set_index('transaction_date')['discount_amount']
+        .resample('W').sum()
+    )
+    std = weekly_disc.std()
+    if std == 0 or pd.isna(std):
+        return pd.Series([False] * len(weekly_disc), index=weekly_disc.index)
+
+    threshold = weekly_disc.mean() + std
+    return weekly_disc > threshold
+
+
+def weekly_demand_baseline(df_product):
+    """
+    Compute a promotion-adjusted weekly demand series for SES/MA training.
+
+    Promotional weeks (identified by detect_promotional_weeks) are replaced
+    with the median demand of non-promotional weeks so that forecasting
+    algorithms are not biased by temporary demand spikes.
+
+    Returns:
+        baseline    (pd.Series) – adjusted weekly demand (same index as raw)
+        promo_weeks (int)       – number of weeks replaced
+    """
+    weekly = weekly_demand_series(df_product)
+    if weekly.empty:
+        return weekly, 0
+
+    promo_mask = detect_promotional_weeks(df_product)
+    promo_aligned = promo_mask.reindex(weekly.index, fill_value=False)
+
+    promo_count = int(promo_aligned.sum())
+    if promo_count == 0 or not (~promo_aligned).any():
+        return weekly, 0
+
+    non_promo_median = weekly[~promo_aligned].median()
+    baseline = weekly.copy()
+    baseline[promo_aligned] = non_promo_median
+    return baseline, promo_count
+
+
 # --------------------------------------------------------------------------- #
 # Demand statistics
 # --------------------------------------------------------------------------- #
@@ -120,6 +227,23 @@ def demand_stats(weekly):
     std = _safe(weekly.std()) if len(weekly) > 1 else 0.0
     velocity = avg / 7 if avg else 0.0
     return avg, std, velocity
+
+
+def demand_stats_from_transactions(sale_transactions):
+    """
+    Recalculate demand stats from a StockTransaction queryset (SALE only).
+    Groups sales by week and feeds into demand_stats().
+    Returns (avg_weekly_demand, std_weekly_demand, daily_velocity).
+    """
+    records = list(sale_transactions.values('date', 'quantity'))
+    if not records:
+        return 0.0, 0.0, 0.0
+    df = pd.DataFrame(records)
+    df['date'] = pd.to_datetime(df['date'], utc=True).dt.tz_localize(None)
+    df = df.set_index('date').sort_index()
+    weekly = df['quantity'].resample('W').sum()
+    weekly = weekly.replace(0, np.nan).ffill().dropna()
+    return demand_stats(weekly)
 
 
 # --------------------------------------------------------------------------- #
@@ -263,16 +387,29 @@ def simulate(weekly_demand, threshold, order_quantity, initial_stock):
     }
 
 
-def run_simulation(weekly_demand, rop, order_quantity, initial_stock):
+def run_simulation(weekly_demand, rop, order_quantity, initial_stock, lead_time=2):
     """
-    Compare the static threshold policy (reorder at <= 10) against the forecast-based
-    ROP policy. Returns both result sets plus stockouts eliminated.
+    Compare two reordering policies over the historical weekly demand series.
+
+    Policy 1 — Naive ROP (no safety buffer):
+        Reorder when stock <= avg_weekly_demand × lead_time with zero safety stock.
+        Represents intuition-based ordering with no statistical buffer.
+        Standard academic baseline for safety-stock studies
+        (Chopra & Meindl, Supply Chain Management, Ch. 11).
+
+    Policy 2 — DSS Forecast-based ROP (with safety stock):
+        Reorder when stock <= calculated ROP (includes safety stock).
     """
-    static = simulate(weekly_demand, STATIC_THRESHOLD, order_quantity, initial_stock)
-    dss = simulate(weekly_demand, rop, order_quantity, initial_stock)
+    demand_series = pd.Series(list(weekly_demand))
+    avg, _, _ = demand_stats(demand_series) if len(demand_series) else (0.0, 0.0, 0.0)
+    naive_rop = reorder_point(avg, lead_time, 0)  # ss=0 → no buffer
+
+    static = simulate(weekly_demand, naive_rop, order_quantity, initial_stock)
+    dss    = simulate(weekly_demand, rop,       order_quantity, initial_stock)
     return {
-        'static': static,
-        'dss': dss,
+        'static':               static,
+        'dss':                  dss,
+        'naive_rop':            round(naive_rop, 1),
         'stockouts_eliminated': max(0, static['stockouts'] - dss['stockouts']),
     }
 
@@ -325,10 +462,12 @@ def per_product_stats(df, product_name):
     }
 
 
-def analyze(weekly, weekly_revenue, current_stock, unit_price, lead_time, z, order_quantity):
+def analyze(weekly, weekly_revenue, current_stock, unit_price, lead_time, z,
+            order_quantity, promo_weeks_count=0):
     """
     Full analysis for a product given its weekly demand/revenue history and settings.
     Bundles forecasting, inventory metrics, simulation and financials for the dashboard.
+    promo_weeks_count: promotional weeks excluded from the baseline (informational only).
     """
     avg, std, velocity = demand_stats(weekly)
     ss = safety_stock(z, std, lead_time)
@@ -336,22 +475,24 @@ def analyze(weekly, weekly_revenue, current_stock, unit_price, lead_time, z, ord
     status = stock_status(current_stock, rop, ss)
 
     comparison = compare_algorithms(weekly)
-    sim = run_simulation(weekly, rop, order_quantity, current_stock)
+    sim = run_simulation(weekly, rop, order_quantity, current_stock, lead_time)
     fin = financials(
         current_stock, unit_price, ss, weekly_revenue,
         sim['static']['stockouts'], sim['dss']['stockouts'],
     )
 
     return {
-        'avg_weekly_demand': avg,
-        'std_weekly_demand': std,
-        'daily_velocity': velocity,
-        'safety_stock': ss,
-        'reorder_point': rop,
-        'sells_out_in': sells_out_in(current_stock, velocity),
-        'status': status,
-        'replenishment_qty': replenishment_qty(rop, current_stock, ss),
-        'forecast': comparison,
-        'simulation': sim,
-        'financials': fin,
+        'avg_weekly_demand':  avg,
+        'std_weekly_demand':  std,
+        'daily_velocity':     velocity,
+        'safety_stock':       ss,
+        'reorder_point':      rop,
+        'sells_out_in':       sells_out_in(current_stock, velocity),
+        'status':             status,
+        'replenishment_qty':  replenishment_qty(rop, current_stock, ss),
+        'forecast':           comparison,
+        'simulation':         sim,
+        'financials':         fin,
+        'data_weeks':         len(weekly),
+        'promo_weeks_count':  promo_weeks_count,
     }

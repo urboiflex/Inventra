@@ -14,7 +14,7 @@ from django.conf import settings
 from django.db import transaction
 
 from . import analytics
-from .models import InventorySettings, Product, UserCSV
+from .models import InventorySettings, Product, StockTransaction, UserCSV
 
 
 def user_csv_path(user):
@@ -33,14 +33,18 @@ def store_uploaded_csv(user, uploaded_file):
 
 
 def load_clean_dataframe(user):
-    """Read and clean the user's stored CSV. Returns a dataframe or None if absent/unreadable."""
+    """Read, normalise and clean the user's stored CSV. Returns a dataframe or None."""
     path = user_csv_path(user)
     if not os.path.exists(path):
         return None
     try:
-        df = pd.read_csv(path)
+        try:
+            df = pd.read_csv(path, encoding='utf-8', low_memory=False)
+        except UnicodeDecodeError:
+            df = pd.read_csv(path, encoding='latin-1', low_memory=False)
+        df = analytics.normalize_csv_format(df)
         return analytics.clean_dataframe(df)
-    except Exception:  # noqa: BLE001 - a corrupt CSV should not crash the dashboard
+    except Exception:  # noqa: BLE001
         return None
 
 
@@ -53,7 +57,11 @@ def process_csv_for_user(user, file_path, original_filename):
     builds one Product per distinct product_name with computed demand statistics,
     and records/updates the UserCSV row. Returns the number of products created.
     """
-    df = pd.read_csv(file_path)
+    try:
+        df = pd.read_csv(file_path, encoding='utf-8', low_memory=False)
+    except UnicodeDecodeError:
+        df = pd.read_csv(file_path, encoding='latin-1', low_memory=False)
+    df = analytics.normalize_csv_format(df)
     df = analytics.clean_dataframe(df)
 
     # Wipe prior data for a clean rebuild (FK cascades remove txns & POs).
@@ -110,13 +118,15 @@ def analyze_product(user, product, df=None):
 
     if df is not None and product.has_csv_history:
         df_product = df[df['product_name'] == product.name]
-        weekly = analytics.weekly_demand_series(df_product)
-        weekly_revenue = analytics.weekly_revenue_series(df_product)
+        # Use promotion-adjusted baseline for forecasting accuracy.
+        # Raw series is NOT passed separately — simulation uses the baseline too,
+        # which is conservative (assumes promo weeks represent a sustainable rate).
+        weekly, promo_count = analytics.weekly_demand_baseline(df_product)
+        weekly_revenue      = analytics.weekly_revenue_series(df_product)
     else:
-        # Manual product with no CSV history: synthesize a flat demand series so the
-        # metrics still compute from the product's stored averages.
-        weekly = pd.Series([product.avg_weekly_demand] * 8) if product.avg_weekly_demand else pd.Series(dtype='float64')
+        weekly      = pd.Series([product.avg_weekly_demand] * 8) if product.avg_weekly_demand else pd.Series(dtype='float64')
         weekly_revenue = pd.Series([product.avg_weekly_demand * product.unit_price] * 8) if product.avg_weekly_demand else pd.Series(dtype='float64')
+        promo_count = 0
 
     result = analytics.analyze(
         weekly=weekly,
@@ -126,11 +136,28 @@ def analyze_product(user, product, df=None):
         lead_time=lead_time,
         z=z,
         order_quantity=order_quantity,
+        promo_weeks_count=promo_count,
     )
+    # For manual products the synthetic series is always 8 weeks long, so data_weeks
+    # would show 8 even with zero real sales. Override with actual transaction history.
+    if not product.has_csv_history:
+        sale_qs = StockTransaction.objects.filter(product=product, transaction_type='SALE')
+        result['data_weeks'] = _count_sale_weeks(sale_qs)
     result['product'] = product
     result['lead_time'] = lead_time
     result['service_level_z'] = z
     return result
+
+
+def _count_sale_weeks(sale_qs):
+    """Return the number of distinct calendar weeks that have at least one sale."""
+    records = list(sale_qs.values('date', 'quantity'))
+    if not records:
+        return 0
+    df = pd.DataFrame(records)
+    df['date'] = pd.to_datetime(df['date'], utc=True).dt.tz_localize(None)
+    weekly = df.set_index('date')['quantity'].resample('W').sum()
+    return int((weekly > 0).sum())
 
 
 def products_summary(user):

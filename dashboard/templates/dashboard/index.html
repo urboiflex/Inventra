@@ -50,6 +50,19 @@
 {% with a=analysis %}
 <!-- ============ OVERVIEW ============ -->
 <section data-panel="overview" class="tab-panel space-y-6">
+  <!-- Low-data warning -->
+  {% if a.data_weeks < 4 %}
+    <div class="rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-blue-800 text-sm flex items-start gap-2">
+      <i data-lucide="info" class="h-4 w-4 mt-0.5 shrink-0"></i>
+      <span>
+        <strong>Limited data:</strong> ROP and Safety Stock are based on
+        <strong>{{ a.data_weeks }} week{% if a.data_weeks != 1 %}s{% endif %}</strong> of sales history.
+        These figures will stabilise after 4+ weeks of recorded sales.
+        {% if a.data_weeks == 0 %}No sales recorded yet — metrics will update as you log sales.{% endif %}
+      </span>
+    </div>
+  {% endif %}
+
   <!-- Alert banner -->
   {% if a.status == 'Safe' %}
     <div class="rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-green-800">
@@ -132,11 +145,20 @@
 <!-- ============ FORECAST ============ -->
 <section data-panel="forecast" class="tab-panel hidden space-y-6">
   <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-    <div class="mb-3 flex items-center justify-between">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h3 class="font-semibold text-gray-900">SES vs Moving Average Forecast</h3>
-      <span class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
-        Best α = {{ a.forecast.best_alpha }}{% include "dashboard/_tip.html" with text="The smoothing factor tested (0.2, 0.5, 0.8) that produced the lowest MAE on your historical data. Higher α makes the forecast react faster to recent changes." %}
-      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        {% if a.promo_weeks_count > 0 %}
+        <span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+          <i data-lucide="tag" class="h-3 w-3"></i>
+          {{ a.promo_weeks_count }} promotional week{{ a.promo_weeks_count|pluralize }} excluded
+          {% include "dashboard/_tip.html" with text="Weeks with abnormally high discounting were detected and replaced with the median non-promotional demand before training the forecast. This prevents promotional spikes from inflating your baseline demand estimate and causing over-ordering." %}
+        </span>
+        {% endif %}
+        <span class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+          Best α = {{ a.forecast.best_alpha }}{% include "dashboard/_tip.html" with text="The smoothing factor tested (0.2, 0.5, 0.8) that produced the lowest MAE on your historical data. Higher α makes the forecast react faster to recent changes." %}
+        </span>
+      </div>
     </div>
     <div id="forecast-chart" class="h-80"></div>
   </div>
@@ -185,7 +207,11 @@
         </tr></thead>
         <tbody class="divide-y divide-gray-100">
           <tr>
-            <td class="py-2 font-medium">Static (≤10){% include "dashboard/_tip.html" with text="Naive policy: reorder whenever stock drops to 10 units or below, regardless of actual demand patterns or lead time." %}</td>
+            <td class="py-2 font-medium">
+              Naive ROP (no buffer)
+              {% include "dashboard/_tip.html" with text="Baseline policy: reorder when stock hits Avg Demand × Lead Time with zero safety stock. Represents intuition-based ordering with no statistical buffer — the standard academic comparison for safety-stock studies (Chopra & Meindl, Supply Chain Management)." %}
+              <span class="ml-1 text-xs font-normal text-gray-400">ROP = {{ a.simulation.naive_rop }}</span>
+            </td>
             <td>{{ a.simulation.static.stockouts }}</td><td>{{ a.simulation.static.service_level|floatformat:1 }}%</td>
           </tr>
           <tr class="bg-green-50">
@@ -197,9 +223,10 @@
     </div>
     <div class="flex items-center rounded-xl border border-green-200 bg-green-50 p-6">
       <p class="text-green-800">
-        <span class="font-semibold">DSS conclusion:</span> the forecast-based policy eliminated
+        <span class="font-semibold">DSS conclusion:</span> compared to the naive ROP baseline (no safety buffer),
+        the forecast-based policy eliminated
         <span class="font-bold">{{ a.simulation.stockouts_eliminated }}</span> stockout(s),
-        saving approximately <span class="font-bold">RM {{ a.financials.dss_savings|floatformat:2 }}</span>.
+        saving approximately <span class="font-bold">RM {{ a.financials.dss_savings|floatformat:2 }}</span> in potential lost sales.
       </p>
     </div>
   </div>
