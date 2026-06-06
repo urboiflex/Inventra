@@ -18,8 +18,6 @@
       <label class="text-sm font-medium text-gray-700">Test weeks:</label>
       <select name="test_weeks" onchange="this.form.submit()"
               class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-indigo-500 focus:outline-none">
-        {% for w in "2,3,4,5,6,8"|split:"," %}
-        {% endfor %}
         <option value="2" {% if test_weeks == 2 %}selected{% endif %}>2</option>
         <option value="3" {% if test_weeks == 3 %}selected{% endif %}>3</option>
         <option value="4" {% if test_weeks == 4 %}selected{% endif %}>4 (default)</option>
@@ -160,11 +158,12 @@
   {% endif %}
 </div>
 
-{% if mae_chart %}
+{% if mae_chart_json %}
 <script>
-  const products = {{ mae_chart.products|safe }};
-  const maeSes   = {{ mae_chart.mae_ses|safe }};
-  const maeMa    = {{ mae_chart.mae_ma|safe }};
+  const chartData = {{ mae_chart_json|safe }};
+  const products  = chartData.products;
+  const maeSes    = chartData.mae_ses;
+  const maeMa     = chartData.mae_ma;
 
   Plotly.newPlot('mae-chart', [
     {

@@ -1,4 +1,6 @@
 """Inventra views: authentication, the tabbed dashboard, products, what-if, admin and settings."""
+import json
+
 from django.contrib import messages
 from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required
@@ -381,21 +383,22 @@ def backtest_view(request):
 
     results, summary = analytics.backtest_all_products(df, test_weeks=test_weeks)
 
-    # Build Plotly grouped-bar chart data for MAE comparison across products.
-    mae_chart = None
+    # Build Plotly grouped-bar chart data — serialised as JSON so the template
+    # can inject it directly into JS without Python→JS repr issues.
+    mae_chart_json = None
     if results:
         sorted_results = sorted(results, key=lambda r: r['mae_ses'], reverse=True)
-        mae_chart = {
+        mae_chart_json = json.dumps({
             'products': [r['product'] for r in sorted_results],
             'mae_ses':  [r['mae_ses']  for r in sorted_results],
             'mae_ma':   [r['mae_ma']   for r in sorted_results],
-        }
+        })
 
     return render(request, 'dashboard/backtest.html', {
-        'results':    results,
-        'summary':    summary,
-        'mae_chart':  mae_chart,
-        'test_weeks': test_weeks,
+        'results':        results,
+        'summary':        summary,
+        'mae_chart_json': mae_chart_json,
+        'test_weeks':     test_weeks,
     })
 
 
