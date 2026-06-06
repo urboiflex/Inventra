@@ -26,4 +26,7 @@ urlpatterns = [
     path('products/<int:pk>/edit/', views.product_edit, name='product_edit'),
     path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
     path('history/clear/', views.clear_history, name='clear_history'),
+
+    # Backtest
+    path('backtest/', views.backtest_view, name='backtest'),
 ]

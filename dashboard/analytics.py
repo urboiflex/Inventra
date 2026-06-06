@@ -521,3 +521,111 @@ def analyze(weekly, weekly_revenue, current_stock, unit_price, lead_time, z,
         'data_weeks':         len(weekly),
         'promo_weeks_count':  promo_weeks_count,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Backtesting
+# --------------------------------------------------------------------------- #
+def _ses_forecast_ahead(train, alpha, n_steps):
+    """
+    SES n-step-ahead out-of-sample forecast.
+    For SES (no trend/seasonality), the optimal forecast for all horizons
+    is the last estimated level — a flat line forward.
+    """
+    if not train:
+        return [0.0] * n_steps
+    fc = ses_forecast(list(train), alpha)
+    return [_safe(fc[-1])] * n_steps
+
+
+def _ma_forecast_ahead(train, n_steps, window=MA_WINDOW):
+    """
+    MA n-step-ahead out-of-sample forecast.
+    Extends with its own forecasts once the look-back window overlaps the future.
+    """
+    history = list(train)
+    preds = []
+    for _ in range(n_steps):
+        available = history + preds
+        w = available[-window:] if len(available) >= window else available
+        preds.append(float(np.mean(w)) if w else 0.0)
+    return preds
+
+
+def backtest_product(weekly, test_weeks=4):
+    """
+    Hold-out backtest for a single product's weekly demand series.
+    Splits into train (all but last test_weeks) and test (last test_weeks).
+    Returns a result dict, or None if there is insufficient data
+    (requires at least 4 training weeks + test_weeks).
+    """
+    demand = list(weekly)
+    if len(demand) < test_weeks + 4:
+        return None
+
+    train = demand[:-test_weeks]
+    test  = demand[-test_weeks:]
+
+    ses        = best_ses(pd.Series(train))
+    ses_preds  = _ses_forecast_ahead(train, ses['alpha'], test_weeks)
+    ma_preds   = _ma_forecast_ahead(train, test_weeks)
+
+    mae_ses_v  = mae(test, ses_preds)
+    rmse_ses_v = rmse(test, ses_preds)
+    mae_ma_v   = mae(test, ma_preds)
+    rmse_ma_v  = rmse(test, ma_preds)
+
+    return {
+        'train_weeks':  len(train),
+        'test_weeks':   test_weeks,
+        'actual':       [round(v, 2) for v in test],
+        'ses_forecast': [round(v, 2) for v in ses_preds],
+        'ma_forecast':  [round(v, 2) for v in ma_preds],
+        'best_alpha':   ses['alpha'],
+        'mae_ses':      round(mae_ses_v, 2),
+        'rmse_ses':     round(rmse_ses_v, 2),
+        'mae_ma':       round(mae_ma_v, 2),
+        'rmse_ma':      round(rmse_ma_v, 2),
+        'best_method':  'SES' if mae_ses_v <= mae_ma_v else 'MA-4',
+    }
+
+
+def backtest_all_products(df, test_weeks=4):
+    """
+    Run hold-out backtest for every product in the dataframe.
+    Uses the promotion-adjusted baseline series (same as the live forecast).
+    Returns (results_list, summary_dict).
+    results_list: one dict per product (includes 'product' key).
+    summary_dict: aggregate MAE/RMSE, win counts, overall best method.
+    """
+    results = []
+    for name, group in df.groupby('product_name', sort=True):
+        weekly, _ = weekly_demand_baseline(group)
+        bt = backtest_product(weekly, test_weeks)
+        if bt is None:
+            continue
+        bt['product'] = name
+        results.append(bt)
+
+    if not results:
+        return [], {}
+
+    mae_ses_vals  = [r['mae_ses']  for r in results]
+    mae_ma_vals   = [r['mae_ma']   for r in results]
+    rmse_ses_vals = [r['rmse_ses'] for r in results]
+    rmse_ma_vals  = [r['rmse_ma']  for r in results]
+    ses_wins = sum(1 for r in results if r['best_method'] == 'SES')
+
+    summary = {
+        'n_products':   len(results),
+        'test_weeks':   test_weeks,
+        'avg_mae_ses':  round(float(np.mean(mae_ses_vals)),  2),
+        'avg_mae_ma':   round(float(np.mean(mae_ma_vals)),   2),
+        'avg_rmse_ses': round(float(np.mean(rmse_ses_vals)), 2),
+        'avg_rmse_ma':  round(float(np.mean(rmse_ma_vals)),  2),
+        'ses_wins':     ses_wins,
+        'ma_wins':      len(results) - ses_wins,
+        'overall_best': 'SES' if np.mean(mae_ses_vals) <= np.mean(mae_ma_vals) else 'MA-4',
+    }
+
+    return results, summary

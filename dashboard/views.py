@@ -18,12 +18,17 @@ def _has_csv(user):
 
 
 def _selected_product(user, request):
-    """Resolve which product the dashboard is analysing (GET param, saved setting, or first)."""
+    """Resolve which product the dashboard is analysing (GET param, saved setting, or first).
+    Persists the choice to InventorySettings so it survives page navigation."""
     qs = Product.objects.filter(user=user)
     pid = request.GET.get('product')
     if pid:
         product = qs.filter(pk=pid).first()
         if product:
+            inv = services.get_settings(user)
+            if inv.selected_product_id != product.pk:
+                inv.selected_product = product
+                inv.save(update_fields=['selected_product'])
             return product
     inv = services.get_settings(user)
     if inv.selected_product and inv.selected_product.user_id == user.id:
@@ -235,6 +240,13 @@ def record_transaction(request):
         quantity=qty, stock_after=product.current_stock,
         notes=request.POST.get('notes', ''),
     )
+    if ttype == 'SALE':
+        sale_txns = StockTransaction.objects.filter(product=product, transaction_type='SALE')
+        avg, std, velocity = analytics.demand_stats_from_transactions(sale_txns)
+        product.avg_weekly_demand = avg
+        product.std_weekly_demand = std
+        product.daily_velocity = velocity
+        product.save(update_fields=['avg_weekly_demand', 'std_weekly_demand', 'daily_velocity'])
     messages.success(request, f"Recorded {ttype.lower()} of {qty:g} {product.name}.")
     return redirect(nxt)
 
@@ -349,6 +361,42 @@ def clear_history(request):
         StockTransaction.objects.filter(user=request.user).delete()
         messages.success(request, "Transaction history cleared.")
     return redirect('admin_panel')
+
+
+# --------------------------------------------------------------------------- #
+# Backtesting
+# --------------------------------------------------------------------------- #
+@login_required
+def backtest_view(request):
+    df = services.load_clean_dataframe(request.user)
+    if df is None:
+        messages.info(request, "Upload a CSV to run the backtest.")
+        return redirect('settings')
+
+    try:
+        test_weeks = int(request.GET.get('test_weeks', 4))
+    except (TypeError, ValueError):
+        test_weeks = 4
+    test_weeks = max(2, min(test_weeks, 8))
+
+    results, summary = analytics.backtest_all_products(df, test_weeks=test_weeks)
+
+    # Build Plotly grouped-bar chart data for MAE comparison across products.
+    mae_chart = None
+    if results:
+        sorted_results = sorted(results, key=lambda r: r['mae_ses'], reverse=True)
+        mae_chart = {
+            'products': [r['product'] for r in sorted_results],
+            'mae_ses':  [r['mae_ses']  for r in sorted_results],
+            'mae_ma':   [r['mae_ma']   for r in sorted_results],
+        }
+
+    return render(request, 'dashboard/backtest.html', {
+        'results':    results,
+        'summary':    summary,
+        'mae_chart':  mae_chart,
+        'test_weeks': test_weeks,
+    })
 
 
 # --------------------------------------------------------------------------- #
