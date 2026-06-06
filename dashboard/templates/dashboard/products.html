@@ -1,0 +1,100 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Products · Inventra{% endblock %}
+{% block page_title %}Products{% endblock %}
+
+{% block content %}
+<!-- Summary bar -->
+<div class="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+  {% include "dashboard/_kpi.html" with label="Total Products" value=counts.total %}
+  <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="text-xs font-medium text-red-600">Critical</div><div class="mt-1 text-2xl font-bold text-red-600">{{ counts.critical }}</div></div>
+  <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="text-xs font-medium text-orange-500">Order Soon</div><div class="mt-1 text-2xl font-bold text-orange-500">{{ counts.order_soon }}</div></div>
+  <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="text-xs font-medium text-green-600">Safe</div><div class="mt-1 text-2xl font-bold text-green-600">{{ counts.safe }}</div></div>
+</div>
+
+<!-- Charts -->
+<div class="mb-6 grid gap-6 lg:grid-cols-3">
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h3 class="mb-2 font-semibold text-gray-900">Stock Health</h3>
+    <div id="donut-chart" class="h-64"></div>
+  </div>
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100 lg:col-span-2">
+    <h3 class="mb-2 font-semibold text-gray-900">Stock vs Reorder Point</h3>
+    <div id="bar-chart" class="h-64"></div>
+  </div>
+</div>
+<div class="mb-6 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+  <h3 class="mb-2 font-semibold text-gray-900">Top 5 Critical Products</h3>
+  <div id="critical-chart" class="h-64"></div>
+</div>
+
+<!-- Table -->
+<div class="rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
+  <table class="w-full text-sm">
+    <thead><tr class="border-b border-gray-100 text-left text-gray-500">
+      <th class="px-5 py-3">Product</th>
+      <th>Stock</th>
+      <th><span class="inline-flex items-center gap-0.5">ROP{% include "dashboard/_tip.html" with text="Reorder Point — place a new order when stock reaches this level. Formula: Avg Weekly Demand × Lead Time + Safety Stock." %}</span></th>
+      <th><span class="inline-flex items-center gap-0.5">Sells Out In{% include "dashboard/_tip.html" with text="Estimated days until stock hits zero at the current daily sales rate (Stock ÷ Daily Velocity)." %}</span></th>
+      <th><span class="inline-flex items-center gap-0.5">Status{% include "dashboard/_tip.html" with text="Safe = stock above ROP. Order Soon = between safety stock and ROP. Critical = at or below safety stock." %}</span></th>
+      <th class="text-right pr-5">Actions</th>
+    </tr></thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for r in rows %}
+      <tr>
+        <td class="px-5 py-3 font-medium text-gray-900">{{ r.product.name }}</td>
+        <td>{{ r.product.current_stock|floatformat:0 }}</td>
+        <td>{{ r.reorder_point|floatformat:0 }}</td>
+        <td>{% if r.sells_out_in %}{{ r.sells_out_in }} days{% else %}—{% endif %}</td>
+        <td>
+          <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold
+            {% if r.status == 'Safe' %}bg-green-100 text-green-700
+            {% elif r.status == 'Order Soon' %}bg-orange-100 text-orange-700
+            {% else %}bg-red-100 text-red-700{% endif %}">{{ r.status }}</span>
+        </td>
+        <td class="pr-5 text-right">
+          <form method="post" action="{% url 'record_transaction' %}" class="inline">
+            {% csrf_token %}
+            <input type="hidden" name="product" value="{{ r.product.id }}">
+            <input type="hidden" name="quantity" value="1">
+            <input type="hidden" name="next" value="products">
+            <button name="transaction_type" value="SALE" class="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">Sale</button>
+            <button name="transaction_type" value="RESTOCK" class="rounded bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100">Restock</button>
+          </form>
+          <a href="{% url 'product_detail' r.product.id %}" class="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700">View</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="px-5 py-6 text-center text-gray-400">No products. <a href="{% url 'settings' %}" class="text-indigo-600">Upload a CSV</a>.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{{ donut|json_script:"donut-data" }}
+{{ bar_chart|json_script:"bar-data" }}
+{{ critical_chart|json_script:"critical-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function J(id){const e=document.getElementById(id);return e?JSON.parse(e.textContent):null;}
+const L = {margin:{t:10,r:10,b:60,l:45}, font:{family:'Inter'}, plot_bgcolor:'#fff', paper_bgcolor:'#fff'};
+
+const donut = J('donut-data');
+if (donut) Plotly.newPlot('donut-chart', [{
+  values:[donut.safe, donut.order_soon, donut.critical], labels:['Safe','Order Soon','Critical'],
+  type:'pie', hole:0.6, marker:{colors:['#16a34a','#f97316','#dc2626']}
+}], {...L, showlegend:true, legend:{orientation:'h', y:-0.1}}, {responsive:true, displayModeBar:false});
+
+const bar = J('bar-data');
+if (bar) Plotly.newPlot('bar-chart', [
+  {x:bar.names, y:bar.stock, name:'Stock', type:'bar', marker:{color:'#4f46e5'}},
+  {x:bar.names, y:bar.rop, name:'ROP', type:'bar', marker:{color:'#f97316'}},
+], {...L, barmode:'group', legend:{orientation:'h', y:-0.3}, xaxis:{tickangle:-40}}, {responsive:true, displayModeBar:false});
+
+const crit = J('critical-data');
+if (crit) Plotly.newPlot('critical-chart', [{
+  x:crit.stock, y:crit.names, type:'bar', orientation:'h', marker:{color:'#dc2626'}
+}], {...L, margin:{t:10,r:10,b:40,l:110}}, {responsive:true, displayModeBar:false});
+</script>
+{% endblock %}

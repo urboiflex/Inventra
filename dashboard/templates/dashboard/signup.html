@@ -1,0 +1,52 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign up · Inventra</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 to-slate-700 px-4 py-8">
+  <div class="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
+    <div class="mb-6 flex items-center gap-2">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-lg font-bold text-white">I</div>
+      <span class="text-xl font-bold text-gray-900">Inventra</span>
+    </div>
+    <h1 class="text-2xl font-bold text-gray-900">Create your account</h1>
+    <p class="mt-1 text-sm text-gray-500">Start managing your inventory smarter.</p>
+
+    {% if form.non_field_errors %}
+    <div class="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+
+    <form method="post" class="mt-6 space-y-4">
+      {% csrf_token %}
+      {% for field in form %}
+      <div>
+        <label class="mb-1 block text-sm font-medium text-gray-700">{{ field.label }}</label>
+        {{ field }}
+        {% if field.errors %}
+          <p class="mt-1 text-xs text-red-600">{{ field.errors|striptags }}</p>
+        {% endif %}
+        {% if field.help_text %}
+          <p class="mt-1 text-xs text-gray-400">{{ field.help_text|safe }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+      <button type="submit" class="w-full rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
+        Create account
+      </button>
+    </form>
+
+    <p class="mt-6 text-center text-sm text-gray-500">
+      Already have an account?
+      <a href="{% url 'login' %}" class="font-semibold text-indigo-600 hover:underline">Sign in</a>
+    </p>
+  </div>
+</body>
+</html>

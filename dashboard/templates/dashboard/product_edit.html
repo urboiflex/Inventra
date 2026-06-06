@@ -1,0 +1,24 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Edit {{ product.name }} · Inventra{% endblock %}
+{% block page_title %}Edit Product{% endblock %}
+
+{% block content %}
+<a href="{% url 'admin_panel' %}" class="mb-4 inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:underline">← Back to Admin</a>
+<div class="max-w-2xl rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+  <h2 class="mb-4 text-lg font-semibold text-gray-900">{{ product.name }}</h2>
+  <form method="post" class="grid gap-4 md:grid-cols-2">
+    {% csrf_token %}
+    {% for field in form %}
+    <div>
+      <label class="mb-1 block text-sm font-medium text-gray-700">{{ field.label }}</label>
+      {{ field }}
+      {% if field.errors %}<p class="mt-1 text-xs text-red-600">{{ field.errors|striptags }}</p>{% endif %}
+    </div>
+    {% endfor %}
+    <div class="md:col-span-2 flex gap-3">
+      <button class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Save Changes</button>
+      <a href="{% url 'admin_panel' %}" class="rounded-lg border border-gray-300 px-5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,5 @@
+Django==6.0.6
+pandas==3.0.3
+numpy==2.4.6
+python-dateutil==2.9.0.post0
+tzdata==2026.2

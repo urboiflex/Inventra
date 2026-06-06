@@ -1,0 +1,99 @@
+{% extends "dashboard/base.html" %}
+{% block title %}{{ product.name }} · Inventra{% endblock %}
+{% block page_title %}{{ product.name }}{% endblock %}
+
+{% block content %}
+{% with a=analysis %}
+<a href="{% url 'products' %}" class="mb-4 inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:underline">← Back to Products</a>
+
+<!-- Status banner -->
+{% if a.status == 'Safe' %}
+  <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-green-800"><span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="check-circle-2" class="h-4 w-4"></i> Stock healthy</span> — {{ product.current_stock|floatformat:0 }} units, above ROP {{ a.reorder_point|floatformat:0 }}.</div>
+{% elif a.status == 'Order Soon' %}
+  <div class="mb-6 rounded-xl border border-orange-200 bg-orange-50 px-5 py-4 text-orange-800"><span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="alert-triangle" class="h-4 w-4"></i> Order soon</span> — {{ product.current_stock|floatformat:0 }} units, nearing ROP {{ a.reorder_point|floatformat:0 }}.</div>
+{% else %}
+  <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-800"><span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="alert-octagon" class="h-4 w-4"></i> Critical</span> — {{ product.current_stock|floatformat:0 }} units, at/below safety stock {{ a.safety_stock|floatformat:0 }}.</div>
+{% endif %}
+
+<!-- KPI cards -->
+<div class="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+  {% include "dashboard/_kpi.html" with label="Current Stock" value=product.current_stock|floatformat:0 tip="Units currently in your inventory for this product." %}
+  {% include "dashboard/_kpi.html" with label="Avg Weekly Demand" value=a.avg_weekly_demand|floatformat:1 tip="Average units sold per week, computed from your historical sales data." %}
+  {% include "dashboard/_kpi.html" with label="Reorder Point" value=a.reorder_point|floatformat:1 tip="Stock level that triggers a new order. Formula: Avg Weekly Demand × Lead Time + Safety Stock." %}
+  {% include "dashboard/_kpi.html" with label="Safety Stock" value=a.safety_stock|floatformat:1 tip="Buffer inventory against demand spikes or supply delays. Formula: Z × Std Dev × √Lead Time." %}
+  {% include "dashboard/_kpi.html" with label="Sells Out In" value=a.sells_out_in|default:"∞" suffix=" days" tip="Estimated days until stock hits zero at the current daily sales rate (Stock ÷ Daily Velocity)." %}
+  {% include "dashboard/_kpi.html" with label="Unit Price" value=product.unit_price|floatformat:2 prefix="RM " tip="Latest unit price from your CSV data, used for financial calculations." %}
+</div>
+
+<div class="grid gap-6 lg:grid-cols-2">
+  <!-- Forecast -->
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <div class="mb-3 flex items-center justify-between">
+      <h3 class="font-semibold text-gray-900">SES vs MA Forecast</h3>
+      <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Best α = {{ a.forecast.best_alpha }} · {{ a.forecast.best_method }}</span>
+    </div>
+    <div id="forecast-chart" class="h-72"></div>
+    <table class="mt-4 w-full text-sm">
+      <thead><tr class="text-left text-gray-500">
+        <th class="py-1">Method</th>
+        <th><span class="inline-flex items-center gap-0.5">MAE{% include "dashboard/_tip.html" with text="Mean Absolute Error — average of |actual − forecast| across all weeks. Lower is better." %}</span></th>
+        <th><span class="inline-flex items-center gap-0.5">RMSE{% include "dashboard/_tip.html" with text="Root Mean Square Error — √(mean of squared errors). Penalises large mistakes more heavily than MAE. Lower is better." %}</span></th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        <tr class="{% if a.forecast.best_method == 'SES' %}bg-green-50{% endif %}"><td class="py-1.5 font-medium">SES (α={{ a.forecast.best_alpha }})</td><td>{{ a.forecast.mae_ses|floatformat:2 }}</td><td>{{ a.forecast.rmse_ses|floatformat:2 }}</td></tr>
+        <tr class="{% if a.forecast.best_method == 'MA-4' %}bg-green-50{% endif %}"><td class="py-1.5 font-medium">MA-4</td><td>{{ a.forecast.mae_ma|floatformat:2 }}</td><td>{{ a.forecast.rmse_ma|floatformat:2 }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Simulation -->
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h3 class="mb-3 font-semibold text-gray-900">Simulation: Static vs Forecast ROP</h3>
+    <div id="simulation-chart" class="h-72"></div>
+    <table class="mt-4 w-full text-sm">
+      <thead><tr class="text-left text-gray-500">
+        <th class="py-1">Policy</th>
+        <th><span class="inline-flex items-center gap-0.5">Stockouts{% include "dashboard/_tip.html" with text="Weeks where demand exceeded available stock, resulting in lost sales." %}</span></th>
+        <th><span class="inline-flex items-center gap-0.5">Service Level{% include "dashboard/_tip.html" with text="(Total Weeks − Stockouts) ÷ Total Weeks × 100%. Higher is better." %}</span></th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        <tr><td class="py-1.5 font-medium">Static (≤10)</td><td>{{ a.simulation.static.stockouts }}</td><td>{{ a.simulation.static.service_level|floatformat:1 }}%</td></tr>
+        <tr class="bg-green-50"><td class="py-1.5 font-medium">Forecast ROP</td><td>{{ a.simulation.dss.stockouts }}</td><td>{{ a.simulation.dss.service_level|floatformat:1 }}%</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Financial -->
+<div class="mt-6 rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+  <h3 class="mb-3 font-semibold text-gray-900">Financial Summary</h3>
+  <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+    {% include "dashboard/_kpi.html" with label="Inventory Value" value=a.financials.inventory_value|floatformat:2 prefix="RM " %}
+    {% include "dashboard/_kpi.html" with label="Avg Weekly Revenue" value=a.financials.avg_weekly_revenue|floatformat:2 prefix="RM " %}
+    {% include "dashboard/_kpi.html" with label="Annual Holding Cost" value=a.financials.holding_cost_annual|floatformat:2 prefix="RM " %}
+    <div class="rounded-xl border border-green-200 bg-green-50 px-4 py-4"><div class="text-xs font-medium text-green-700">DSS Savings</div><div class="mt-1 text-2xl font-bold text-green-700">RM {{ a.financials.dss_savings|floatformat:2 }}</div></div>
+  </div>
+</div>
+{% endwith %}
+
+{{ forecast_chart|json_script:"forecast-data" }}
+{{ simulation_chart|json_script:"simulation-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function J(id){const e=document.getElementById(id);return e?JSON.parse(e.textContent):null;}
+const L = {margin:{t:10,r:10,b:40,l:45}, legend:{orientation:'h', y:-0.2}, font:{family:'Inter'}, plot_bgcolor:'#fff', paper_bgcolor:'#fff'};
+const f = J('forecast-data');
+if (f) Plotly.newPlot('forecast-chart', [
+  {x:f.weeks, y:f.actual, name:'Actual', mode:'lines', line:{color:'#0f172a', width:2}},
+  {x:f.weeks, y:f.ses, name:'SES', mode:'lines', line:{color:'#4f46e5', dash:'dot'}},
+  {x:f.weeks, y:f.ma, name:'MA-4', mode:'lines', line:{color:'#f97316', dash:'dash'}},
+], {...L, xaxis:{title:'Week'}, yaxis:{title:'Units'}}, {responsive:true, displayModeBar:false});
+const s = J('simulation-data');
+if (s) Plotly.newPlot('simulation-chart', [
+  {x:s.weeks, y:s.static, name:'Static (≤10)', mode:'lines', line:{color:'#f97316'}},
+  {x:s.weeks, y:s.dss, name:'Forecast ROP', mode:'lines', line:{color:'#16a34a'}},
+], {...L, xaxis:{title:'Week'}, yaxis:{title:'Stock'}}, {responsive:true, displayModeBar:false});
+</script>
+{% endblock %}

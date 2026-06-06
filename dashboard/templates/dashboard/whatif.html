@@ -1,0 +1,99 @@
+{% extends "dashboard/base.html" %}
+{% block title %}What-If · Inventra{% endblock %}
+{% block page_title %}What-If Simulator{% endblock %}
+
+{% block content %}
+<form method="get" class="mb-6 flex items-center gap-3">
+  <label class="text-sm font-medium text-gray-600">Base on product</label>
+  <select name="product" onchange="this.form.submit()"
+          class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+    {% for p in products %}<option value="{{ p.id }}" {% if selected and p.id == selected.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+  </select>
+</form>
+
+<div class="grid gap-6 lg:grid-cols-2">
+  <!-- Sliders -->
+  <div class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-100 space-y-6">
+    <div>
+      <div class="flex justify-between text-sm"><label class="inline-flex items-center font-medium text-gray-700">Current Stock{% include "dashboard/_tip.html" with text="Units currently in your inventory. Drag to simulate different stock levels." %}</label><span id="stock-val" class="font-bold text-indigo-600"></span></div>
+      <input id="stock" type="range" min="0" max="200" step="1" class="mt-2 w-full accent-indigo-600">
+    </div>
+    <div>
+      <div class="flex justify-between text-sm"><label class="inline-flex items-center font-medium text-gray-700">Lead Time (weeks){% include "dashboard/_tip.html" with text="Number of weeks between placing an order and receiving the stock. Longer lead time requires a higher safety stock and ROP." %}</label><span id="lt-val" class="font-bold text-indigo-600"></span></div>
+      <input id="lt" type="range" min="1" max="6" step="1" class="mt-2 w-full accent-indigo-600">
+    </div>
+    <div>
+      <div class="flex justify-between text-sm"><label class="inline-flex items-center font-medium text-gray-700">Service Level{% include "dashboard/_tip.html" with text="Desired probability of meeting customer demand without a stockout. Higher levels require more safety stock. 95% (Z=1.65) is a common industry standard." %}</label><span id="sl-val" class="font-bold text-indigo-600"></span></div>
+      <input id="sl" type="range" min="0" max="3" step="1" value="1" class="mt-2 w-full accent-indigo-600">
+    </div>
+    <p class="text-xs text-gray-400">Avg weekly demand <b id="avg-lbl"></b> · Std <b id="std-lbl"></b> · Daily velocity <b id="vel-lbl"></b> (from product history)</p>
+  </div>
+
+  <!-- Results -->
+  <div class="space-y-4">
+    <div id="banner" class="rounded-xl border px-5 py-4 text-sm font-medium"></div>
+    <div class="grid grid-cols-2 gap-4">
+      <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="flex items-center text-xs text-gray-500">Safety Stock{% include "dashboard/_tip.html" with text="Buffer stock against unexpected demand or delays. Formula: Z × Std Dev × √Lead Time." %}</div><div id="r-ss" class="mt-1 text-2xl font-bold text-gray-900"></div></div>
+      <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="flex items-center text-xs text-gray-500">Reorder Point{% include "dashboard/_tip.html" with text="Place a new order when stock falls to this level. Formula: Avg Demand × Lead Time + Safety Stock." %}</div><div id="r-rop" class="mt-1 text-2xl font-bold text-gray-900"></div></div>
+      <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="flex items-center text-xs text-gray-500">Order Qty{% include "dashboard/_tip.html" with text="Suggested order quantity to bring stock back above the Reorder Point: max(0, ROP − Current Stock)." %}</div><div id="r-oq" class="mt-1 text-2xl font-bold text-gray-900"></div></div>
+      <div class="rounded-xl bg-white px-4 py-4 shadow-sm ring-1 ring-gray-100"><div class="flex items-center text-xs text-gray-500">Sells Out In{% include "dashboard/_tip.html" with text="Days until stock reaches zero at the current daily sales rate (Stock ÷ Daily Velocity)." %}</div><div id="r-soi" class="mt-1 text-2xl font-bold text-gray-900"></div></div>
+    </div>
+    <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100"><canvas id="whatif-chart" height="140"></canvas></div>
+  </div>
+</div>
+
+{{ defaults|json_script:"defaults" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const D = JSON.parse(document.getElementById('defaults').textContent);
+const Z_LEVELS = [{z:1.28,l:'90%'},{z:1.65,l:'95%'},{z:1.96,l:'97.5%'},{z:2.33,l:'99%'}];
+const avg = +D.avg_weekly_demand || 0, std = +D.std_weekly_demand || 0, vel = +D.daily_velocity || 0;
+
+const stock = document.getElementById('stock'), lt = document.getElementById('lt'), sl = document.getElementById('sl');
+stock.value = Math.round(+D.current_stock || 25);
+stock.max = Math.max(200, Math.round((+D.current_stock||25) * 2));
+lt.value = +D.lead_time || 2;
+document.getElementById('avg-lbl').textContent = avg.toFixed(1);
+document.getElementById('std-lbl').textContent = std.toFixed(1);
+document.getElementById('vel-lbl').textContent = vel.toFixed(2);
+
+let chart;
+function recompute() {
+  const cs = +stock.value, L = +lt.value, lvl = Z_LEVELS[+sl.value], Z = lvl.z;
+  const ss = Z * std * Math.sqrt(L);
+  const rop = avg * L + ss;
+  const oq = Math.max(0, rop - cs);
+  const soi = vel > 0 ? Math.round(cs / vel) : null;
+
+  document.getElementById('stock-val').textContent = cs;
+  document.getElementById('lt-val').textContent = L;
+  document.getElementById('sl-val').textContent = lvl.l;
+  document.getElementById('r-ss').textContent = ss.toFixed(1);
+  document.getElementById('r-rop').textContent = rop.toFixed(1);
+  document.getElementById('r-oq').textContent = oq.toFixed(0);
+  document.getElementById('r-soi').textContent = soi === null ? '∞' : soi + ' days';
+
+  const banner = document.getElementById('banner');
+  const ICONS = {
+    safe:     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block align-middle mr-1.5 shrink-0"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>',
+    warn:     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block align-middle mr-1.5 shrink-0"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    critical: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block align-middle mr-1.5 shrink-0"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
+  };
+  if (cs > rop)      { banner.className='rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm font-medium text-green-800'; banner.innerHTML=ICONS.safe+'<span class="font-semibold">Safe</span> — stock is above the reorder point.'; }
+  else if (cs > ss)  { banner.className='rounded-xl border border-orange-200 bg-orange-50 px-5 py-4 text-sm font-medium text-orange-800'; banner.innerHTML=ICONS.warn+'<span class="font-semibold">Order soon</span> — stock is between safety stock and ROP.'; }
+  else               { banner.className='rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-800'; banner.innerHTML=ICONS.critical+'<span class="font-semibold">Critical</span> — stock is at or below safety stock.'; }
+
+  const data = [cs, ss, rop];
+  if (chart) { chart.data.datasets[0].data = data; chart.update(); }
+  else chart = new Chart(document.getElementById('whatif-chart'), {
+    type: 'bar',
+    data: { labels: ['Current Stock','Safety Stock','Reorder Point'], datasets: [{ data, backgroundColor: ['#4f46e5','#f97316','#dc2626'] }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
+}
+[stock, lt, sl].forEach(el => el.addEventListener('input', recompute));
+recompute();
+</script>
+{% endblock %}

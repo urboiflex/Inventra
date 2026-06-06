@@ -1,0 +1,107 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Admin · Inventra{% endblock %}
+{% block page_title %}Admin Panel{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+
+  <!-- Section A: Product Management -->
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h2 class="mb-4 text-lg font-semibold text-gray-900">A · Product Management</h2>
+    <form method="post" action="{% url 'product_create' %}" class="mb-5 grid gap-3 rounded-lg bg-gray-50 p-4 md:grid-cols-4">
+      {% csrf_token %}
+      {% for field in product_form %}
+      <div>
+        <label class="mb-1 block text-xs font-medium text-gray-600">{{ field.label }}</label>
+        {{ field }}
+      </div>
+      {% endfor %}
+      <div class="md:col-span-4"><button class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Add Product</button></div>
+    </form>
+    <table class="w-full text-sm">
+      <thead><tr class="border-b border-gray-100 text-left text-gray-500"><th class="py-2">Product</th><th>Stock</th><th>Price</th><th>Lead</th><th>Source</th><th class="text-right">Actions</th></tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for p in products %}
+        <tr>
+          <td class="py-2 font-medium text-gray-900">{{ p.name }}</td>
+          <td>{{ p.current_stock|floatformat:0 }}</td>
+          <td>RM {{ p.unit_price|floatformat:2 }}</td>
+          <td>{{ p.lead_time }}w</td>
+          <td>{% if p.has_csv_history %}<span class="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">CSV Data</span>{% else %}<span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">Manual</span>{% endif %}</td>
+          <td class="text-right">
+            <a href="{% url 'product_edit' p.id %}" class="rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-200">Edit</a>
+            <form method="post" action="{% url 'product_delete' p.id %}" class="inline" onsubmit="return confirm('Delete {{ p.name }}?');">{% csrf_token %}<button class="rounded bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100">Delete</button></form>
+          </td>
+        </tr>
+        {% empty %}<tr><td colspan="6" class="py-4 text-center text-gray-400">No products yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Section B: Record Transaction -->
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h2 class="mb-4 text-lg font-semibold text-gray-900">B · Record Transaction</h2>
+    <form method="post" action="{% url 'record_transaction' %}" class="grid gap-3 md:grid-cols-5">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="admin_panel">
+      <select name="product" required class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none md:col-span-2">
+        {% for p in products %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select>
+      <select name="transaction_type" class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+        <option value="SALE">Sale</option><option value="RESTOCK">Restock</option>
+      </select>
+      <input type="number" step="any" min="0" name="quantity" placeholder="Qty" required class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+      <button class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Record</button>
+      <input type="text" name="notes" placeholder="Notes (optional)" class="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none md:col-span-5">
+    </form>
+  </section>
+
+  <!-- Section C: Purchase Orders -->
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h2 class="mb-4 text-lg font-semibold text-gray-900">C · Purchase Orders</h2>
+    <table class="w-full text-sm">
+      <thead><tr class="border-b border-gray-100 text-left text-gray-500"><th class="py-2">Product</th><th>Qty</th><th>Status</th><th>Date</th><th class="text-right">Actions</th></tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for o in orders %}
+        <tr>
+          <td class="py-2 font-medium text-gray-900">{{ o.product.name }}</td>
+          <td>{{ o.quantity|floatformat:0 }}</td>
+          <td><span class="rounded-full px-2.5 py-0.5 text-xs font-semibold {% if o.status == 'Received' %}bg-green-100 text-green-700{% elif o.status == 'Ordered' %}bg-blue-100 text-blue-700{% else %}bg-orange-100 text-orange-700{% endif %}">{{ o.status }}</span></td>
+          <td class="text-gray-500">{{ o.created_at|date:"M d, Y" }}</td>
+          <td class="text-right">
+            <form method="post" action="{% url 'order_action' o.id %}" class="inline">{% csrf_token %}<input type="hidden" name="next" value="admin_panel">
+              {% if o.status == 'Suggested' %}<button name="action" value="order" class="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700">Mark Ordered</button>{% endif %}
+              {% if o.status == 'Ordered' %}<button name="action" value="receive" class="rounded bg-green-600 px-2 py-1 text-xs text-white hover:bg-green-700">Mark Received</button>{% endif %}
+              <button name="action" value="delete" class="rounded bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}<tr><td colspan="5" class="py-4 text-center text-gray-400">No purchase orders.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Section D: Transaction History -->
+  <section class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <div class="mb-4 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">D · Transaction History</h2>
+      <form method="post" action="{% url 'clear_history' %}" onsubmit="return confirm('Clear all transaction history? This cannot be undone.');">{% csrf_token %}<button class="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50">Clear History</button></form>
+    </div>
+    <table class="w-full text-sm">
+      <thead><tr class="border-b border-gray-100 text-left text-gray-500"><th class="py-2">Date</th><th>Product</th><th>Type</th><th>Qty</th><th>Stock After</th></tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for t in transactions %}
+        <tr>
+          <td class="py-2 text-gray-500">{{ t.date|date:"M d, Y H:i" }}</td>
+          <td class="font-medium text-gray-900">{{ t.product.name }}</td>
+          <td><span class="{% if t.transaction_type == 'SALE' %}text-red-600{% else %}text-green-600{% endif %} font-medium">{{ t.get_transaction_type_display }}</span></td>
+          <td>{{ t.quantity|floatformat:0 }}</td>
+          <td>{{ t.stock_after|floatformat:0 }}</td>
+        </tr>
+        {% empty %}<tr><td colspan="5" class="py-4 text-center text-gray-400">No transactions recorded.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+</div>
+{% endblock %}

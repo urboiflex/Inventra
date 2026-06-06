@@ -1,0 +1,57 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Settings · Inventra{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="grid gap-8 lg:grid-cols-2">
+
+  <!-- Section A: CSV Upload -->
+  <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+    <h2 class="mb-1 text-lg font-semibold text-gray-900">A · Data Source</h2>
+    <p class="mb-4 text-sm text-gray-500">Upload a CSV of your sales transactions to power the dashboard.</p>
+
+    {% if user_csv and user_csv.is_processed %}
+    <div class="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+      <p><span class="font-semibold">{{ user_csv.original_filename }}</span></p>
+      <p class="text-green-700">{{ user_csv.product_count }} products · uploaded {{ user_csv.uploaded_at|date:"M d, Y H:i" }}</p>
+    </div>
+    <div class="mb-4 rounded-lg border border-orange-200 bg-orange-50 p-3 text-xs text-orange-800">
+      <span class="inline-flex items-center gap-1.5"><i data-lucide="alert-triangle" class="h-3.5 w-3.5 shrink-0"></i> Uploading a new CSV will wipe all your current products, transactions and orders.</span>
+    </div>
+    {% else %}
+    <div class="mb-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600">
+      No CSV uploaded yet. Required columns:
+      <code class="text-xs">transaction_date, product_name, quantity, final_amount, unit_price</code> (min 10 rows).
+    </div>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="space-y-3">
+      {% csrf_token %}
+      {{ upload_form.csv_file }}
+      {% if upload_form.csv_file.errors %}<p class="text-xs text-red-600">{{ upload_form.csv_file.errors|striptags }}</p>{% endif %}
+      <p class="text-xs text-gray-400">{{ upload_form.csv_file.help_text }}</p>
+      <button name="upload_csv" value="1" class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
+        {% if user_csv %}Replace CSV{% else %}Upload & Process{% endif %}
+      </button>
+    </form>
+  </section>
+
+  <!-- Section B: Inventory Settings -->
+  <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
+    <h2 class="mb-1 text-lg font-semibold text-gray-900">B · Inventory Settings</h2>
+    <p class="mb-4 text-sm text-gray-500">These drive your safety-stock and reorder-point calculations.</p>
+    <form method="post" class="space-y-4">
+      {% csrf_token %}
+      {% for field in settings_form %}
+      <div>
+        <label class="mb-1 block text-sm font-medium text-gray-700">{{ field.label }}</label>
+        {{ field }}
+        {% if field.errors %}<p class="mt-1 text-xs text-red-600">{{ field.errors|striptags }}</p>{% endif %}
+      </div>
+      {% endfor %}
+      <button name="save_settings" value="1" class="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Save Settings</button>
+    </form>
+  </section>
+
+</div>
+{% endblock %}

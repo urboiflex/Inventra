@@ -1,0 +1,344 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Overview · Inventra{% endblock %}
+{% block page_title %}Realtime Overview{% endblock %}
+
+{% block content %}
+<!-- Product selector + summary -->
+<div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+  <form method="get" class="flex items-center gap-3">
+    <label class="text-sm font-medium text-gray-600">Product</label>
+    <select name="product" onchange="this.form.submit()"
+            class="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-900 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+      {% for p in products %}
+        <option value="{{ p.id }}" {% if selected and p.id == selected.id %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  <div class="grid grid-cols-4 gap-3">
+    <div class="rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-100 text-center">
+      <div class="text-xs text-gray-500">Total</div><div class="text-xl font-bold text-gray-900">{{ summary.total }}</div>
+    </div>
+    <div class="rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-100 text-center">
+      <div class="text-xs text-gray-500">Critical</div><div class="text-xl font-bold text-red-600">{{ summary.critical }}</div>
+    </div>
+    <div class="rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-100 text-center">
+      <div class="text-xs text-gray-500">Order Soon</div><div class="text-xl font-bold text-orange-500">{{ summary.order_soon }}</div>
+    </div>
+    <div class="rounded-xl bg-white px-4 py-3 shadow-sm ring-1 ring-gray-100 text-center">
+      <div class="text-xs text-gray-500">Safe</div><div class="text-xl font-bold text-green-600">{{ summary.safe }}</div>
+    </div>
+  </div>
+</div>
+
+{% if not selected %}
+  <div class="rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
+    No products yet. <a href="{% url 'settings' %}" class="font-semibold text-indigo-600">Upload a CSV</a> to get started.
+  </div>
+{% else %}
+
+<!-- Tabs -->
+<div class="mb-5 border-b border-gray-200">
+  <nav class="flex gap-1 text-sm font-medium" id="tab-nav">
+    <button data-tab="overview"   class="tab-btn -mb-px border-b-2 px-4 py-2.5">Overview</button>
+    <button data-tab="forecast"   class="tab-btn -mb-px border-b-2 px-4 py-2.5">Forecast</button>
+    <button data-tab="simulation" class="tab-btn -mb-px border-b-2 px-4 py-2.5">Simulation</button>
+    <button data-tab="orders"     class="tab-btn -mb-px border-b-2 px-4 py-2.5">My Orders</button>
+    <button data-tab="financial"  class="tab-btn -mb-px border-b-2 px-4 py-2.5">Financial</button>
+  </nav>
+</div>
+
+{% with a=analysis %}
+<!-- ============ OVERVIEW ============ -->
+<section data-panel="overview" class="tab-panel space-y-6">
+  <!-- Alert banner -->
+  {% if a.status == 'Safe' %}
+    <div class="rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-green-800">
+      <span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="check-circle-2" class="h-4 w-4"></i> Stock healthy.</span> {{ selected.name }} has {{ selected.current_stock|floatformat:0 }} units — above the reorder point of {{ a.reorder_point|floatformat:0 }}.
+    </div>
+  {% elif a.status == 'Order Soon' %}
+    <div class="rounded-xl border border-orange-200 bg-orange-50 px-5 py-4 text-orange-800">
+      <span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="alert-triangle" class="h-4 w-4"></i> Order soon.</span> {{ selected.name }} is at {{ selected.current_stock|floatformat:0 }} units, nearing the reorder point of {{ a.reorder_point|floatformat:0 }}.
+    </div>
+  {% else %}
+    <div class="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
+      <span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="alert-octagon" class="h-4 w-4"></i> Critical.</span> {{ selected.name }} is at {{ selected.current_stock|floatformat:0 }} units — at or below safety stock ({{ a.safety_stock|floatformat:0 }}). Reorder now.
+    </div>
+  {% endif %}
+
+  <!-- KPI cards -->
+  <div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+    {% include "dashboard/_kpi.html" with label="Current Stock" value=selected.current_stock|floatformat:0 tip="Units currently in your inventory for this product." %}
+    {% include "dashboard/_kpi.html" with label="Avg Weekly Demand" value=a.avg_weekly_demand|floatformat:1 tip="Average units sold per week, computed from your historical sales data." %}
+    {% include "dashboard/_kpi.html" with label="Reorder Point" value=a.reorder_point|floatformat:1 tip="Stock level that triggers a new order. Formula: Avg Weekly Demand × Lead Time + Safety Stock." %}
+    {% include "dashboard/_kpi.html" with label="Safety Stock" value=a.safety_stock|floatformat:1 tip="Buffer inventory against demand spikes or supply delays. Formula: Z × Std Dev × √Lead Time." %}
+    {% include "dashboard/_kpi.html" with label="Sells Out In" value=a.sells_out_in|default:"∞" suffix=" days" tip="Estimated days until stock hits zero at the current daily sales rate (Stock ÷ Daily Velocity)." %}
+    {% include "dashboard/_kpi.html" with label="Daily Velocity" value=a.daily_velocity|floatformat:2 tip="Average units sold per day — Avg Weekly Demand ÷ 7." %}
+  </div>
+
+  <div class="grid gap-6 lg:grid-cols-3">
+    <!-- Quick sale / restock -->
+    <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+      <h3 class="mb-3 font-semibold text-gray-900">Quick Transaction</h3>
+      <form method="post" action="{% url 'record_transaction' %}" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="product" value="{{ selected.id }}">
+        <input type="hidden" name="next" value="/?product={{ selected.id }}">
+        <input type="number" step="any" min="0" name="quantity" placeholder="Quantity" required
+               class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
+        <div class="flex gap-2">
+          <button name="transaction_type" value="SALE" class="flex-1 rounded-lg bg-red-600 py-2 text-sm font-semibold text-white hover:bg-red-700">Sale</button>
+          <button name="transaction_type" value="RESTOCK" class="flex-1 rounded-lg bg-green-600 py-2 text-sm font-semibold text-white hover:bg-green-700">Restock</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- PO suggestion -->
+    <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+      <h3 class="mb-3 font-semibold text-gray-900">Purchase Suggestion</h3>
+      {% if selected.current_stock <= a.reorder_point %}
+        <p class="text-sm text-gray-600">Stock is at/below ROP. Suggested order:</p>
+        <p class="my-2 text-3xl font-bold text-indigo-600">{{ a.replenishment_qty|floatformat:0 }} <span class="text-base font-medium text-gray-500">units</span></p>
+        <form method="post" action="{% url 'create_order' %}">
+          {% csrf_token %}
+          <input type="hidden" name="product" value="{{ selected.id }}">
+          <input type="hidden" name="quantity" value="{{ a.replenishment_qty|floatformat:0 }}">
+          <input type="hidden" name="next" value="/?product={{ selected.id }}">
+          <button class="w-full rounded-lg bg-indigo-600 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Place Order</button>
+        </form>
+      {% else %}
+        <p class="text-sm text-gray-500">No order needed — stock is comfortably above the reorder point.</p>
+      {% endif %}
+    </div>
+
+    <!-- Recent activity -->
+    <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+      <h3 class="mb-3 font-semibold text-gray-900">Recent Activity</h3>
+      <ul class="space-y-2 text-sm">
+        {% for t in recent_transactions %}
+        <li class="flex items-center justify-between">
+          <span class="{% if t.transaction_type == 'SALE' %}text-red-600{% else %}text-green-600{% endif %} font-medium">
+            {{ t.get_transaction_type_display }} {{ t.quantity|floatformat:0 }}
+          </span>
+          <span class="text-gray-400">{{ t.product.name }} · {{ t.date|date:"M d" }}</span>
+        </li>
+        {% empty %}
+        <li class="text-gray-400">No transactions yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FORECAST ============ -->
+<section data-panel="forecast" class="tab-panel hidden space-y-6">
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <div class="mb-3 flex items-center justify-between">
+      <h3 class="font-semibold text-gray-900">SES vs Moving Average Forecast</h3>
+      <span class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+        Best α = {{ a.forecast.best_alpha }}{% include "dashboard/_tip.html" with text="The smoothing factor tested (0.2, 0.5, 0.8) that produced the lowest MAE on your historical data. Higher α makes the forecast react faster to recent changes." %}
+      </span>
+    </div>
+    <div id="forecast-chart" class="h-80"></div>
+  </div>
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h3 class="mb-3 font-semibold text-gray-900">Algorithm Comparison</h3>
+    <table class="w-full text-sm">
+      <thead><tr class="text-left text-gray-500">
+        <th class="py-2">Method</th>
+        <th><span class="inline-flex items-center gap-0.5">MAE{% include "dashboard/_tip.html" with text="Mean Absolute Error — average of |actual − forecast| across all weeks. Lower is better." %}</span></th>
+        <th><span class="inline-flex items-center gap-0.5">RMSE{% include "dashboard/_tip.html" with text="Root Mean Square Error — √(mean of squared errors). Penalises large forecast mistakes more heavily than MAE. Lower is better." %}</span></th>
+        <th></th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        <tr class="{% if a.forecast.best_method == 'SES' %}bg-green-50{% endif %}">
+          <td class="py-2 font-medium">SES (α={{ a.forecast.best_alpha }}){% include "dashboard/_tip.html" with text="Single Exponential Smoothing — a weighted forecast where α controls how quickly it adapts to recent demand. Tested at α = 0.2, 0.5, and 0.8." %}</td>
+          <td>{{ a.forecast.mae_ses|floatformat:2 }}</td>
+          <td>{{ a.forecast.rmse_ses|floatformat:2 }}</td>
+          <td>{% if a.forecast.best_method == 'SES' %}<span class="rounded-full bg-green-600 px-2 py-0.5 text-xs text-white">Best</span>{% endif %}</td>
+        </tr>
+        <tr class="{% if a.forecast.best_method == 'MA-4' %}bg-green-50{% endif %}">
+          <td class="py-2 font-medium">MA-4{% include "dashboard/_tip.html" with text="4-Week Moving Average — forecast is the mean of the previous 4 weeks of actual demand. Simple and stable but slower to react to trend changes." %}</td>
+          <td>{{ a.forecast.mae_ma|floatformat:2 }}</td>
+          <td>{{ a.forecast.rmse_ma|floatformat:2 }}</td>
+          <td>{% if a.forecast.best_method == 'MA-4' %}<span class="rounded-full bg-green-600 px-2 py-0.5 text-xs text-white">Best</span>{% endif %}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="mt-3 text-sm text-gray-500">Lower error is better. <span class="font-semibold text-gray-700">{{ a.forecast.best_method }}</span> is the more accurate method for {{ selected.name }}.</p>
+  </div>
+</section>
+
+<!-- ============ SIMULATION ============ -->
+<section data-panel="simulation" class="tab-panel hidden space-y-6">
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h3 class="mb-3 font-semibold text-gray-900">Static Threshold vs Forecast-based ROP</h3>
+    <div id="simulation-chart" class="h-80"></div>
+  </div>
+  <div class="grid gap-6 lg:grid-cols-2">
+    <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+      <h3 class="mb-3 font-semibold text-gray-900">Results</h3>
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-gray-500">
+          <th class="py-2">Policy</th>
+          <th><span class="inline-flex items-center gap-0.5">Stockouts{% include "dashboard/_tip.html" with text="Number of weeks where demand exceeded available stock, resulting in lost sales. Fewer stockouts = better." %}</span></th>
+          <th><span class="inline-flex items-center gap-0.5">Service Level{% include "dashboard/_tip.html" with text="Percentage of weeks where all demand was fulfilled: (Total Weeks − Stockouts) ÷ Total Weeks × 100%. Higher is better." %}</span></th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-100">
+          <tr>
+            <td class="py-2 font-medium">Static (≤10){% include "dashboard/_tip.html" with text="Naive policy: reorder whenever stock drops to 10 units or below, regardless of actual demand patterns or lead time." %}</td>
+            <td>{{ a.simulation.static.stockouts }}</td><td>{{ a.simulation.static.service_level|floatformat:1 }}%</td>
+          </tr>
+          <tr class="bg-green-50">
+            <td class="py-2 font-medium">Forecast ROP{% include "dashboard/_tip.html" with text="DSS-driven policy: reorder when stock hits the calculated Reorder Point, which accounts for your actual demand, variability and lead time." %}</td>
+            <td>{{ a.simulation.dss.stockouts }}</td><td>{{ a.simulation.dss.service_level|floatformat:1 }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="flex items-center rounded-xl border border-green-200 bg-green-50 p-6">
+      <p class="text-green-800">
+        <span class="font-semibold">DSS conclusion:</span> the forecast-based policy eliminated
+        <span class="font-bold">{{ a.simulation.stockouts_eliminated }}</span> stockout(s),
+        saving approximately <span class="font-bold">RM {{ a.financials.dss_savings|floatformat:2 }}</span>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MY ORDERS ============ -->
+<section data-panel="orders" class="tab-panel hidden space-y-6">
+  <div class="grid grid-cols-3 gap-4">
+    {% include "dashboard/_kpi.html" with label="Suggested" value=order_counts.suggested %}
+    {% include "dashboard/_kpi.html" with label="Ordered" value=order_counts.ordered %}
+    {% include "dashboard/_kpi.html" with label="Received" value=order_counts.received %}
+  </div>
+  <div class="rounded-xl bg-white shadow-sm ring-1 ring-gray-100">
+    <table class="w-full text-sm">
+      <thead><tr class="border-b border-gray-100 text-left text-gray-500">
+        <th class="px-5 py-3">Date</th><th>Product</th><th>Qty</th><th>Status</th><th class="text-right pr-5">Actions</th>
+      </tr></thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for o in orders %}
+        <tr>
+          <td class="px-5 py-3 text-gray-500">{{ o.created_at|date:"M d, Y" }}</td>
+          <td class="font-medium text-gray-900">{{ o.product.name }}</td>
+          <td>{{ o.quantity|floatformat:0 }}</td>
+          <td>
+            <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold
+              {% if o.status == 'Received' %}bg-green-100 text-green-700
+              {% elif o.status == 'Ordered' %}bg-blue-100 text-blue-700
+              {% else %}bg-orange-100 text-orange-700{% endif %}">{{ o.status }}</span>
+          </td>
+          <td class="pr-5 text-right">
+            <form method="post" action="{% url 'order_action' o.id %}" class="inline">
+              {% csrf_token %}<input type="hidden" name="next" value="/?product={{ o.product.id }}#orders">
+              {% if o.status == 'Suggested' %}
+                <button name="action" value="order" class="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700">Confirm</button>
+              {% elif o.status == 'Ordered' %}
+                <button name="action" value="receive" class="rounded bg-green-600 px-2 py-1 text-xs text-white hover:bg-green-700">Mark Received</button>
+              {% endif %}
+              <button name="action" value="delete" class="rounded bg-gray-200 px-2 py-1 text-xs text-gray-700 hover:bg-gray-300">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="px-5 py-6 text-center text-gray-400">No orders yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ FINANCIAL ============ -->
+<section data-panel="financial" class="tab-panel hidden space-y-6">
+  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    {% include "dashboard/_kpi.html" with label="Inventory Value" value=a.financials.inventory_value|floatformat:2 prefix="RM " tip="Current Stock × Unit Price — total capital tied up in this product's inventory." %}
+    {% include "dashboard/_kpi.html" with label="Avg Weekly Revenue" value=a.financials.avg_weekly_revenue|floatformat:2 prefix="RM " tip="Average weekly sales revenue for this product, computed from your historical transaction data." %}
+    {% include "dashboard/_kpi.html" with label="Annual Holding Cost" value=a.financials.holding_cost_annual|floatformat:2 prefix="RM " tip="Estimated yearly cost of holding safety stock: Safety Stock × Unit Price × 25% (standard annual holding rate)." %}
+    <div class="rounded-xl border border-green-200 bg-green-50 px-4 py-4">
+      <div class="flex items-center text-xs font-medium text-green-700">DSS Savings{% include "dashboard/_tip.html" with text="Estimated reduction in lost revenue by using the forecast-based ROP instead of the static threshold. Calculated as: Stockouts eliminated × Avg Weekly Revenue." %}</div>
+      <div class="mt-1 text-2xl font-bold text-green-700">RM {{ a.financials.dss_savings|floatformat:2 }}</div>
+    </div>
+  </div>
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h3 class="mb-3 font-semibold text-gray-900">Weekly Revenue Trend</h3>
+    <div id="revenue-chart" class="h-72"></div>
+  </div>
+  <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+    <h3 class="mb-3 font-semibold text-gray-900">Financial Summary</h3>
+    <table class="w-full text-sm">
+      <tbody class="divide-y divide-gray-100">
+        <tr><td class="py-2 text-gray-600">Inventory value{% include "dashboard/_tip.html" with text="Current Stock × Unit Price — capital tied up in inventory." %}</td><td class="text-right font-medium">RM {{ a.financials.inventory_value|floatformat:2 }}</td></tr>
+        <tr><td class="py-2 text-gray-600">Avg / Max / Min weekly revenue{% include "dashboard/_tip.html" with text="Summary of weekly sales revenue from historical data. Avg is used to value each potential stockout." %}</td><td class="text-right font-medium">RM {{ a.financials.avg_weekly_revenue|floatformat:2 }} / {{ a.financials.max_revenue|floatformat:2 }} / {{ a.financials.min_revenue|floatformat:2 }}</td></tr>
+        <tr><td class="py-2 text-gray-600">Weekly / Annual holding cost{% include "dashboard/_tip.html" with text="Cost of holding safety stock. Formula: Safety Stock × Unit Price × 25% per year (standard holding rate), divided by 52 for the weekly figure." %}</td><td class="text-right font-medium">RM {{ a.financials.holding_cost_weekly|floatformat:2 }} / {{ a.financials.holding_cost_annual|floatformat:2 }}</td></tr>
+        <tr><td class="py-2 text-gray-600">Stockout cost — static vs DSS{% include "dashboard/_tip.html" with text="Estimated lost revenue from stockouts under each policy: Stockout occurrences × Avg Weekly Revenue. The DSS policy reduces this by reordering earlier." %}</td><td class="text-right font-medium">RM {{ a.financials.stockout_cost_static|floatformat:2 }} → RM {{ a.financials.stockout_cost_dss|floatformat:2 }}</td></tr>
+        <tr class="bg-green-50"><td class="py-2 font-semibold text-green-700">DSS savings{% include "dashboard/_tip.html" with text="Static stockout cost minus DSS stockout cost — the monetary benefit of using the forecast-based reorder policy." %}</td><td class="text-right font-bold text-green-700">RM {{ a.financials.dss_savings|floatformat:2 }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endwith %}
+{% endif %}
+
+{{ forecast_chart|json_script:"forecast-data" }}
+{{ simulation_chart|json_script:"simulation-data" }}
+{{ revenue_chart|json_script:"revenue-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---- Tab switching (no page reload) ----
+const ACTIVE = ['border-indigo-600', 'text-indigo-600'];
+const INACTIVE = ['border-transparent', 'text-gray-500', 'hover:text-gray-800'];
+function activate(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const on = b.dataset.tab === name;
+    b.classList.toggle('border-indigo-600', on);
+    b.classList.toggle('text-indigo-600', on);
+    b.classList.toggle('border-transparent', !on);
+    b.classList.toggle('text-gray-500', !on);
+  });
+  if (name === 'forecast') drawForecast();
+  if (name === 'simulation') drawSimulation();
+  if (name === 'financial') drawRevenue();
+}
+document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
+  history.replaceState(null, '', '#' + b.dataset.tab);
+  activate(b.dataset.tab);
+}));
+
+// ---- Plotly charts (drawn lazily so hidden panels size correctly) ----
+function readJSON(id) { const el = document.getElementById(id); return el ? JSON.parse(el.textContent) : null; }
+const LAYOUT = { margin: {t: 10, r: 10, b: 40, l: 45}, legend: {orientation: 'h', y: -0.2}, font: {family: 'Inter'}, plot_bgcolor: '#fff', paper_bgcolor: '#fff' };
+let drawn = {};
+function drawForecast() {
+  if (drawn.forecast) return; const d = readJSON('forecast-data'); if (!d) return;
+  Plotly.newPlot('forecast-chart', [
+    {x: d.weeks, y: d.actual, name: 'Actual', mode: 'lines', line: {color: '#0f172a', width: 2}},
+    {x: d.weeks, y: d.ses, name: 'SES', mode: 'lines', line: {color: '#4f46e5', dash: 'dot'}},
+    {x: d.weeks, y: d.ma, name: 'MA-4', mode: 'lines', line: {color: '#f97316', dash: 'dash'}},
+  ], {...LAYOUT, xaxis: {title: 'Week'}, yaxis: {title: 'Units'}}, {responsive: true, displayModeBar: false});
+  drawn.forecast = true;
+}
+function drawSimulation() {
+  if (drawn.simulation) return; const d = readJSON('simulation-data'); if (!d) return;
+  Plotly.newPlot('simulation-chart', [
+    {x: d.weeks, y: d.static, name: 'Static (≤10)', mode: 'lines', line: {color: '#f97316'}},
+    {x: d.weeks, y: d.dss, name: 'Forecast ROP', mode: 'lines', line: {color: '#16a34a'}},
+  ], {...LAYOUT, xaxis: {title: 'Week'}, yaxis: {title: 'Stock level'}}, {responsive: true, displayModeBar: false});
+  drawn.simulation = true;
+}
+function drawRevenue() {
+  if (drawn.revenue) return; const d = readJSON('revenue-data'); if (!d) return;
+  Plotly.newPlot('revenue-chart', [
+    {x: d.weeks, y: d.values, type: 'bar', marker: {color: '#4f46e5'}},
+  ], {...LAYOUT, xaxis: {title: 'Week'}, yaxis: {title: 'Revenue (RM)'}}, {responsive: true, displayModeBar: false});
+  drawn.revenue = true;
+}
+
+// ---- Init from URL hash ----
+const initial = (location.hash || '#overview').slice(1);
+activate(['overview','forecast','simulation','orders','financial'].includes(initial) ? initial : 'overview');
+</script>
+{% endblock %}

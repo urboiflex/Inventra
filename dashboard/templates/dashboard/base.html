@@ -1,0 +1,94 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Inventra{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+<div class="flex min-h-screen">
+
+  <!-- Sidebar -->
+  {% with url_name=request.resolver_match.url_name %}
+  <aside class="fixed inset-y-0 left-0 z-20 flex w-60 flex-col bg-slate-900 text-slate-300">
+    <div class="flex items-center gap-2 px-6 py-5">
+      <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-lg font-bold text-white">I</div>
+      <span class="text-lg font-bold text-white">Inventra</span>
+    </div>
+    <nav class="mt-2 flex-1 space-y-1 px-3 text-sm">
+      <a href="{% url 'index' %}#overview" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if url_name == 'index' %}bg-slate-800 text-white{% else %}hover:bg-slate-800/60 hover:text-white{% endif %}">
+        <i data-lucide="layout-dashboard" class="h-4 w-4 shrink-0"></i> Overview
+      </a>
+      <a href="{% url 'products' %}" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if url_name == 'products' or url_name == 'product_detail' %}bg-slate-800 text-white{% else %}hover:bg-slate-800/60 hover:text-white{% endif %}">
+        <i data-lucide="package" class="h-4 w-4 shrink-0"></i> Products
+      </a>
+      <a href="{% url 'whatif' %}" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if url_name == 'whatif' %}bg-slate-800 text-white{% else %}hover:bg-slate-800/60 hover:text-white{% endif %}">
+        <i data-lucide="sliders-horizontal" class="h-4 w-4 shrink-0"></i> What-If
+      </a>
+      <div class="px-3 pt-4 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Manage</div>
+      <a href="{% url 'admin_panel' %}" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if url_name == 'admin_panel' %}bg-slate-800 text-white{% else %}hover:bg-slate-800/60 hover:text-white{% endif %}">
+        <i data-lucide="wrench" class="h-4 w-4 shrink-0"></i> Admin
+      </a>
+      <a href="{% url 'settings' %}" class="flex items-center gap-3 rounded-lg px-3 py-2.5 {% if url_name == 'settings' %}bg-slate-800 text-white{% else %}hover:bg-slate-800/60 hover:text-white{% endif %}">
+        <i data-lucide="settings" class="h-4 w-4 shrink-0"></i> Settings
+      </a>
+    </nav>
+    <div class="border-t border-slate-800 px-4 py-4 text-xs text-slate-500">
+      Inventra DSS · SME Inventory
+    </div>
+  </aside>
+  {% endwith %}
+
+  <!-- Main area -->
+  <div class="ml-60 flex w-full flex-col">
+    <!-- Top bar -->
+    <header class="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white/90 px-8 py-4 backdrop-blur">
+      <h1 class="text-xl font-bold text-gray-900">{% block page_title %}Dashboard{% endblock %}</h1>
+      <div class="flex items-center gap-4">
+        <span class="text-sm text-gray-600">Hi, <span class="font-semibold text-gray-900">{{ request.user.username }}</span></span>
+        <a href="{% url 'logout' %}" class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100">Logout</a>
+      </div>
+    </header>
+
+    <!-- Messages -->
+    {% if messages %}
+    <div class="space-y-2 px-8 pt-4">
+      {% for message in messages %}
+      <div class="rounded-lg border px-4 py-3 text-sm
+        {% if message.tags == 'success' %}border-green-200 bg-green-50 text-green-800
+        {% elif message.tags == 'error' %}border-red-200 bg-red-50 text-red-800
+        {% elif message.tags == 'warning' %}border-orange-200 bg-orange-50 text-orange-800
+        {% else %}border-blue-200 bg-blue-50 text-blue-800{% endif %}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Page content -->
+    <main class="flex-1 px-8 py-6">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+<script>lucide.createIcons();</script>
+</body>
+</html>
