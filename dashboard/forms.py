@@ -45,8 +45,8 @@ class SignupForm(UserCreationForm):
 
 class CSVUploadForm(forms.Form):
     csv_file = forms.FileField(
-        label="CSV file",
-        help_text="Required columns: transaction_date, product_name, quantity, final_amount, unit_price",
+        label="Data file",
+        help_text="Accepted formats: .csv or .xlsx (Inventra native or UCI Online Retail)",
     )
 
     def __init__(self, *args, **kwargs):
@@ -55,12 +55,12 @@ class CSVUploadForm(forms.Form):
             "block w-full text-sm text-gray-700 file:mr-4 file:rounded-lg file:border-0 "
             "file:bg-indigo-600 file:px-4 file:py-2 file:text-white hover:file:bg-indigo-700"
         )
-        self.fields['csv_file'].widget.attrs['accept'] = '.csv'
+        self.fields['csv_file'].widget.attrs['accept'] = '.csv,.xlsx'
 
     def clean_csv_file(self):
         f = self.cleaned_data['csv_file']
-        if not f.name.lower().endswith('.csv'):
-            raise forms.ValidationError("Please upload a file with a .csv extension.")
+        if not f.name.lower().endswith(('.csv', '.xlsx')):
+            raise forms.ValidationError("Please upload a .csv or .xlsx file.")
         return f
 
 

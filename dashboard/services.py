@@ -8,6 +8,7 @@ Responsibilities:
   - assemble the full analysis context for a single product
 """
 import os
+import tempfile
 
 import pandas as pd
 from django.conf import settings
@@ -23,12 +24,32 @@ def user_csv_path(user):
 
 
 def store_uploaded_csv(user, uploaded_file):
-    """Persist an uploaded file object to the user's canonical CSV path. Returns the path."""
+    """
+    Persist an uploaded CSV or XLSX file to the user's canonical CSV path.
+    XLSX files are read into a dataframe and written out as CSV so the rest
+    of the pipeline always sees a plain CSV at data.csv.
+    Returns the destination path.
+    """
     dest = user_csv_path(user)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, 'wb') as fh:
-        for chunk in uploaded_file.chunks():
-            fh.write(chunk)
+
+    if uploaded_file.name.lower().endswith(('.xlsx', '.xls')):
+        # Write to a temp file first (Django InMemoryUploadedFile needs seekable file)
+        suffix = '.xlsx' if uploaded_file.name.lower().endswith('.xlsx') else '.xls'
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            for chunk in uploaded_file.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+        try:
+            df = pd.read_excel(tmp_path, engine='openpyxl')
+            df.to_csv(dest, index=False)
+        finally:
+            os.unlink(tmp_path)
+    else:
+        with open(dest, 'wb') as fh:
+            for chunk in uploaded_file.chunks():
+                fh.write(chunk)
+
     return dest
 
 

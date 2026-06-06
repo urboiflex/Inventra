@@ -8,7 +8,7 @@
   <!-- Section A: CSV Upload -->
   <section class="rounded-xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
     <h2 class="mb-1 text-lg font-semibold text-gray-900">A · Data Source</h2>
-    <p class="mb-4 text-sm text-gray-500">Upload a CSV of your sales transactions to power the dashboard.</p>
+    <p class="mb-4 text-sm text-gray-500">Upload a CSV or Excel file of your sales transactions to power the dashboard.</p>
 
     {% if user_csv and user_csv.is_processed %}
     <div class="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
@@ -20,7 +20,7 @@
     </div>
     {% else %}
     <div class="mb-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-600 space-y-3">
-      <p class="font-medium text-gray-700">No CSV uploaded yet. Two formats are accepted:</p>
+      <p class="font-medium text-gray-700">No file uploaded yet. Accepted: <code class="text-xs">.csv</code> or <code class="text-xs">.xlsx</code> — two schemas supported:</p>
       <div>
         <p class="text-xs font-semibold text-gray-600 mb-1">Format A — Inventra Native <span class="font-normal text-gray-400">(min 10 rows)</span></p>
         <div class="flex flex-wrap gap-1.5">
