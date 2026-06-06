@@ -26,6 +26,7 @@ class Product(models.Model):
     avg_weekly_demand = models.FloatField(default=0)
     std_weekly_demand = models.FloatField(default=0)
     daily_velocity = models.FloatField(default=0)
+    prior_avg_demand = models.FloatField(default=0, help_text="Your best estimate of weekly demand. Used as a starting point that phases out automatically once 4 weeks of real sales are recorded.")
     has_csv_history = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

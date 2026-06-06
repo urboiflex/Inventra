@@ -219,6 +219,36 @@ def weekly_demand_baseline(df_product):
 
 
 # --------------------------------------------------------------------------- #
+# Cold-start prior blending
+# --------------------------------------------------------------------------- #
+PRIOR_FULL_TRUST_WEEKS = 4  # weeks of real data needed before prior is ignored
+
+
+def blend_with_prior(computed_avg, prior_avg, data_weeks):
+    """
+    Blend a transaction-computed demand average with a user-supplied prior estimate.
+
+    Weight shifts linearly from pure prior (0 real weeks) to pure computed
+    (>= PRIOR_FULL_TRUST_WEEKS weeks).  Inspired by Bayesian prior updating:
+    as evidence accumulates, the prior loses influence.
+
+    Args:
+        computed_avg: avg_weekly_demand calculated from real StockTransactions
+        prior_avg:    user-entered estimate (prior_avg_demand on the Product)
+        data_weeks:   number of calendar weeks with at least one recorded sale
+
+    Returns:
+        blended float — the demand estimate to use for analysis
+    """
+    if prior_avg <= 0:
+        return computed_avg  # no prior set, use computed as-is
+    if data_weeks >= PRIOR_FULL_TRUST_WEEKS:
+        return computed_avg  # enough real data, ignore prior completely
+    weight = data_weeks / PRIOR_FULL_TRUST_WEEKS  # 0.0 → 1.0
+    return weight * computed_avg + (1.0 - weight) * prior_avg
+
+
+# --------------------------------------------------------------------------- #
 # Demand statistics
 # --------------------------------------------------------------------------- #
 def demand_stats(weekly):

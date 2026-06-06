@@ -193,9 +193,24 @@ def analyze_product(user, product, df=None):
         df_product = df[df['product_name'] == product.name]
         weekly, promo_count = analytics.weekly_demand_baseline(df_product)
         weekly_revenue      = analytics.weekly_revenue_series(df_product)
+        prior_active        = False
     else:
-        weekly         = pd.Series([product.avg_weekly_demand] * 8) if product.avg_weekly_demand else pd.Series(dtype='float64')
-        weekly_revenue = pd.Series([product.avg_weekly_demand * product.unit_price] * 8) if product.avg_weekly_demand else pd.Series(dtype='float64')
+        # Manual product: compute actual data weeks from transaction history.
+        sale_qs    = StockTransaction.objects.filter(product=product, transaction_type='SALE')
+        data_weeks = _count_sale_weeks(sale_qs)
+
+        # Blend computed avg with user prior when data is sparse.
+        blended_avg = analytics.blend_with_prior(
+            product.avg_weekly_demand, product.prior_avg_demand, data_weeks
+        )
+        prior_active = (
+            product.prior_avg_demand > 0
+            and data_weeks < analytics.PRIOR_FULL_TRUST_WEEKS
+        )
+
+        effective_avg  = blended_avg if blended_avg > 0 else 0
+        weekly         = pd.Series([effective_avg] * 8) if effective_avg else pd.Series(dtype='float64')
+        weekly_revenue = pd.Series([effective_avg * product.unit_price] * 8) if effective_avg else pd.Series(dtype='float64')
         promo_count    = 0
 
     result = analytics.analyze(
@@ -209,8 +224,12 @@ def analyze_product(user, product, df=None):
         promo_weeks_count=promo_count,
     )
     if not product.has_csv_history:
-        sale_qs = StockTransaction.objects.filter(product=product, transaction_type='SALE')
-        result['data_weeks'] = _count_sale_weeks(sale_qs)
+        result['data_weeks']    = data_weeks
+        result['prior_active']  = prior_active
+        result['prior_avg']     = product.prior_avg_demand
+    else:
+        result['prior_active']  = False
+        result['prior_avg']     = 0
     result['product']        = product
     result['lead_time']      = lead_time
     result['service_level_z'] = z

@@ -69,8 +69,17 @@ class ProductForm(forms.ModelForm):
         model = Product
         fields = [
             'name', 'current_stock', 'unit_price', 'lead_time',
-            'supplier_name', 'supplier_contact', 'avg_weekly_demand', 'std_weekly_demand',
+            'supplier_name', 'supplier_contact',
+            'prior_avg_demand', 'std_weekly_demand',
         ]
+        labels = {
+            'prior_avg_demand': 'Est. weekly demand (prior)',
+            'std_weekly_demand': 'Demand variability (std dev)',
+        }
+        help_texts = {
+            'prior_avg_demand': 'Your best guess for weekly sales. Phases out automatically after 4 weeks of recorded sales.',
+            'std_weekly_demand': 'Leave 0 if unknown — will be computed from sales history.',
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

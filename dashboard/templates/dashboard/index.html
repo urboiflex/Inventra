@@ -50,15 +50,27 @@
 {% with a=analysis %}
 <!-- ============ OVERVIEW ============ -->
 <section data-panel="overview" class="tab-panel space-y-6">
-  <!-- Low-data warning -->
+  <!-- Low-data / prior-active banner -->
   {% if a.data_weeks < 4 %}
-    <div class="rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-blue-800 text-sm flex items-start gap-2">
-      <i data-lucide="info" class="h-4 w-4 mt-0.5 shrink-0"></i>
+    <div class="rounded-xl border px-5 py-3 text-sm flex items-start gap-2
+      {% if a.prior_active %}border-violet-200 bg-violet-50 text-violet-800{% else %}border-blue-200 bg-blue-50 text-blue-800{% endif %}">
+      <i data-lucide="{% if a.prior_active %}flask-conical{% else %}info{% endif %}" class="h-4 w-4 mt-0.5 shrink-0"></i>
       <span>
-        <strong>Limited data:</strong> ROP and Safety Stock are based on
-        <strong>{{ a.data_weeks }} week{% if a.data_weeks != 1 %}s{% endif %}</strong> of sales history.
-        These figures will stabilise after 4+ weeks of recorded sales.
-        {% if a.data_weeks == 0 %}No sales recorded yet — metrics will update as you log sales.{% endif %}
+        {% if a.prior_active %}
+          <strong>Prior active:</strong> Using your estimate of
+          <strong>{{ a.prior_avg|floatformat:1 }} units/week</strong> blended with
+          {{ a.data_weeks }} week{% if a.data_weeks != 1 %}s{% endif %} of real sales
+          ({{ a.data_weeks }}/4 weeks — prior phases out at 4 weeks).
+          ROP and Safety Stock will become more accurate as you record more sales.
+        {% else %}
+          <strong>Limited data:</strong> ROP and Safety Stock are based on
+          <strong>{{ a.data_weeks }} week{% if a.data_weeks != 1 %}s{% endif %}</strong> of sales history.
+          These figures will stabilise after 4+ weeks of recorded sales.
+          {% if a.data_weeks == 0 %}
+            No sales recorded yet.
+            {% if not a.prior_active %}Set an <strong>Est. weekly demand</strong> in Admin → Edit Product to get a starting estimate.{% endif %}
+          {% endif %}
+        {% endif %}
       </span>
     </div>
   {% endif %}
