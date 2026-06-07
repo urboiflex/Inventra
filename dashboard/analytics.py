@@ -278,6 +278,39 @@ def detect_holiday_weeks(weekly_index):
     return pd.Series(result, index=weekly_index)
 
 
+def _compute_baseline(df_product):
+    """
+    Internal helper: compute the demand baseline and return all intermediate masks.
+
+    Returns (baseline, promo_count, holiday_count, promo_aligned, holiday_aligned)
+    where the masks are boolean Series indexed by the weekly DatetimeIndex.
+    Use weekly_demand_baseline() for callers that don't need the masks, and
+    weekly_demand_baseline_with_masks() when chart annotation requires them.
+    """
+    weekly = weekly_demand_series(df_product)
+    _empty_mask = pd.Series(dtype=bool)
+    if weekly.empty:
+        return weekly, 0, 0, _empty_mask, _empty_mask
+
+    promo_mask   = detect_promotional_weeks(df_product)
+    holiday_mask = detect_holiday_weeks(weekly.index)
+
+    promo_aligned   = promo_mask.reindex(weekly.index, fill_value=False)
+    holiday_aligned = holiday_mask.reindex(weekly.index, fill_value=False)
+    combined_mask   = promo_aligned | holiday_aligned
+
+    promo_count   = int(promo_aligned.sum())
+    holiday_count = int(holiday_aligned.sum())
+
+    if not combined_mask.any() or not (~combined_mask).any():
+        return weekly, promo_count, holiday_count, promo_aligned, holiday_aligned
+
+    baseline_median = weekly[~combined_mask].median()
+    baseline = weekly.copy()
+    baseline[combined_mask] = baseline_median
+    return baseline, promo_count, holiday_count, promo_aligned, holiday_aligned
+
+
 def weekly_demand_baseline(df_product):
     """
     Compute a promotion- and holiday-adjusted weekly demand series for SES/MA training.
@@ -291,27 +324,23 @@ def weekly_demand_baseline(df_product):
         promo_weeks   (int)       – promotional weeks replaced
         holiday_weeks (int)       – public-holiday weeks replaced
     """
-    weekly = weekly_demand_series(df_product)
-    if weekly.empty:
-        return weekly, 0, 0
-
-    promo_mask   = detect_promotional_weeks(df_product)
-    holiday_mask = detect_holiday_weeks(weekly.index)
-
-    promo_aligned   = promo_mask.reindex(weekly.index, fill_value=False)
-    holiday_aligned = holiday_mask.reindex(weekly.index, fill_value=False)
-    combined_mask   = promo_aligned | holiday_aligned
-
-    promo_count   = int(promo_aligned.sum())
-    holiday_count = int(holiday_aligned.sum())
-
-    if not combined_mask.any() or not (~combined_mask).any():
-        return weekly, promo_count, holiday_count
-
-    baseline_median = weekly[~combined_mask].median()
-    baseline = weekly.copy()
-    baseline[combined_mask] = baseline_median
+    baseline, promo_count, holiday_count, _, _ = _compute_baseline(df_product)
     return baseline, promo_count, holiday_count
+
+
+def weekly_demand_baseline_with_masks(df_product):
+    """
+    Same as weekly_demand_baseline() but also returns the boolean masks so callers
+    can identify which specific weeks were adjusted (e.g. for chart annotation).
+
+    Returns:
+        baseline        (pd.Series)  – adjusted weekly demand
+        promo_count     (int)        – promotional weeks replaced
+        holiday_count   (int)        – holiday weeks replaced
+        promo_aligned   (pd.Series)  – bool mask, True = promotional week
+        holiday_aligned (pd.Series)  – bool mask, True = holiday week
+    """
+    return _compute_baseline(df_product)
 
 
 # --------------------------------------------------------------------------- #
@@ -432,23 +461,45 @@ def best_ses(weekly):
 def compare_algorithms(weekly):
     """
     Compare best-SES against the 4-week moving average.
-    Returns a dict with per-method MAE/RMSE, forecasts, the chosen alpha and best method.
+    Returns a dict with per-method MAE/RMSE, forecasts, the chosen alpha, best method,
+    date labels for the chart x-axis, and a 4-week ahead projection for each method.
     """
     demand = list(weekly)
     ses = best_ses(weekly)
     ma_fc = ma_forecast(demand)
     mae_ma, rmse_ma = mae(demand, ma_fc), rmse(demand, ma_fc)
     best_method = 'SES' if ses['mae'] <= mae_ma else 'MA-4'
+
+    # Date x-axis labels — only available when weekly carries a DatetimeIndex.
+    if isinstance(getattr(weekly, 'index', None), pd.DatetimeIndex) and len(weekly) > 0:
+        week_dates   = [d.strftime('%Y-%m-%d') for d in weekly.index]
+        last_date    = weekly.index[-1]
+        future_dates = [
+            (last_date + pd.Timedelta(weeks=i + 1)).strftime('%Y-%m-%d')
+            for i in range(4)
+        ]
+    else:
+        week_dates   = []
+        future_dates = []
+
+    # 4-week ahead out-of-sample forecast (flat SES level; MA extended with own preds).
+    ses_future = _ses_forecast_ahead(demand, ses['alpha'], 4)
+    ma_future  = _ma_forecast_ahead(demand, 4)
+
     return {
-        'weeks': demand,
-        'best_alpha': ses['alpha'],
+        'weeks':        demand,
+        'week_dates':   week_dates,
+        'best_alpha':   ses['alpha'],
         'ses_forecast': ses['forecast'],
-        'ma_forecast': ma_fc,
-        'mae_ses': ses['mae'],
-        'rmse_ses': ses['rmse'],
-        'mae_ma': mae_ma,
-        'rmse_ma': rmse_ma,
-        'best_method': best_method,
+        'ma_forecast':  ma_fc,
+        'mae_ses':      ses['mae'],
+        'rmse_ses':     ses['rmse'],
+        'mae_ma':       mae_ma,
+        'rmse_ma':      rmse_ma,
+        'best_method':  best_method,
+        'future_dates': future_dates,
+        'ses_future':   [round(v, 2) for v in ses_future],
+        'ma_future':    [round(v, 2) for v in ma_future],
     }
 
 

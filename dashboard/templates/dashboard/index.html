@@ -359,18 +359,54 @@ function readJSON(id) { const el = document.getElementById(id); return el ? JSON
 const LAYOUT = { margin: {t: 10, r: 10, b: 40, l: 45}, legend: {orientation: 'h', y: -0.2}, font: {family: 'Inter'}, plot_bgcolor: '#fff', paper_bgcolor: '#fff' };
 let drawn = {};
 function drawForecast() {
-  if (drawn.forecast) return; const d = readJSON('forecast-data'); if (!d) return;
-  Plotly.newPlot('forecast-chart', [
-    {x: d.weeks, y: d.actual, name: 'Actual', mode: 'lines', line: {color: '#0f172a', width: 2}},
-    {x: d.weeks, y: d.ses, name: 'SES', mode: 'lines', line: {color: '#4f46e5', dash: 'dot'}},
-    {x: d.weeks, y: d.ma, name: 'MA-4', mode: 'lines', line: {color: '#f97316', dash: 'dash'}},
-  ], {...LAYOUT, xaxis: {title: 'Week'}, yaxis: {title: 'Units'}}, {responsive: true, displayModeBar: false});
+  if (drawn.forecast) return;
+  const d = readJSON('forecast-data');
+  if (!d) return;
+  const useDates = d.weeks.length > 0 && typeof d.weeks[0] === 'string';
+  const traces = [
+    {x: d.weeks, y: d.actual, name: 'Actual demand', mode: 'lines', line: {color: '#0f172a', width: 2}},
+    {x: d.weeks, y: d.ses,    name: 'SES (fitted)',  mode: 'lines', line: {color: '#4f46e5', dash: 'dot'}},
+    {x: d.weeks, y: d.ma,     name: 'MA-4 (fitted)', mode: 'lines', line: {color: '#f97316', dash: 'dash'}},
+  ];
+  // 4-week forward projection — connect last historical point to first future point
+  if (useDates && d.future_dates && d.future_dates.length) {
+    const lastX = d.weeks[d.weeks.length - 1];
+    traces.push({
+      x: [lastX, ...d.future_dates], y: [d.ses[d.ses.length-1], ...d.ses_future],
+      name: 'SES (+4 wk)', mode: 'lines',
+      line: {color: '#4f46e5', dash: 'dot', width: 1.5}, opacity: 0.45, showlegend: true,
+    });
+    traces.push({
+      x: [lastX, ...d.future_dates], y: [d.ma[d.ma.length-1], ...d.ma_future],
+      name: 'MA-4 (+4 wk)', mode: 'lines',
+      line: {color: '#f97316', dash: 'dash', width: 1.5}, opacity: 0.45, showlegend: true,
+    });
+  }
+  // Promotional week markers
+  if (d.promo_dates && d.promo_dates.length) {
+    const py = d.promo_dates.map(dt => { const i = d.weeks.indexOf(dt); return i >= 0 ? d.actual[i] : null; });
+    traces.push({x: d.promo_dates, y: py, name: 'Promo week', mode: 'markers',
+      marker: {color: '#f59e0b', size: 10, symbol: 'triangle-up'}, showlegend: true});
+  }
+  // Holiday week markers
+  if (d.holiday_dates && d.holiday_dates.length) {
+    const hy = d.holiday_dates.map(dt => { const i = d.weeks.indexOf(dt); return i >= 0 ? d.actual[i] : null; });
+    traces.push({x: d.holiday_dates, y: hy, name: 'Holiday week', mode: 'markers',
+      marker: {color: '#3b82f6', size: 10, symbol: 'diamond'}, showlegend: true});
+  }
+  const shapes = useDates && d.future_dates && d.future_dates.length ? [{
+    type: 'line', x0: d.weeks[d.weeks.length-1], x1: d.weeks[d.weeks.length-1],
+    y0: 0, y1: 1, yref: 'paper', line: {color: '#94a3b8', dash: 'dot', width: 1},
+  }] : [];
+  Plotly.newPlot('forecast-chart', traces,
+    {...LAYOUT, shapes, xaxis: {title: useDates ? 'Date' : 'Week'}, yaxis: {title: 'Units'}},
+    {responsive: true, displayModeBar: false});
   drawn.forecast = true;
 }
 function drawSimulation() {
   if (drawn.simulation) return; const d = readJSON('simulation-data'); if (!d) return;
   Plotly.newPlot('simulation-chart', [
-    {x: d.weeks, y: d.static, name: 'Static (≤10)', mode: 'lines', line: {color: '#f97316'}},
+    {x: d.weeks, y: d.static, name: 'Naive ROP', mode: 'lines', line: {color: '#f97316'}},
     {x: d.weeks, y: d.dss, name: 'Forecast ROP', mode: 'lines', line: {color: '#16a34a'}},
   ], {...LAYOUT, xaxis: {title: 'Week'}, yaxis: {title: 'Stock level'}}, {responsive: true, displayModeBar: false});
   drawn.simulation = true;

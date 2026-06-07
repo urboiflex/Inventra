@@ -191,9 +191,15 @@ def analyze_product(user, product, df=None):
 
     if df is not None and product.has_csv_history:
         df_product = df[df['product_name'] == product.name]
-        weekly, promo_count, holiday_count = analytics.weekly_demand_baseline(df_product)
-        weekly_revenue      = analytics.weekly_revenue_series(df_product)
-        prior_active        = False
+        weekly, promo_count, holiday_count, promo_mask, holiday_mask = \
+            analytics.weekly_demand_baseline_with_masks(df_product)
+        weekly_revenue = analytics.weekly_revenue_series(df_product)
+        prior_active   = False
+        # Dates of adjusted weeks for forecast chart annotation.
+        promo_week_dates   = [d.strftime('%Y-%m-%d') for d in weekly.index[promo_mask]] \
+            if not weekly.empty and promo_mask.any() else []
+        holiday_week_dates = [d.strftime('%Y-%m-%d') for d in weekly.index[holiday_mask]] \
+            if not weekly.empty and holiday_mask.any() else []
     else:
         # Manual product: compute actual data weeks from transaction history.
         sale_qs    = StockTransaction.objects.filter(product=product, transaction_type='SALE')
@@ -211,8 +217,10 @@ def analyze_product(user, product, df=None):
         effective_avg  = blended_avg if blended_avg > 0 else 0
         weekly         = pd.Series([effective_avg] * 8) if effective_avg else pd.Series(dtype='float64')
         weekly_revenue = pd.Series([effective_avg * product.unit_price] * 8) if effective_avg else pd.Series(dtype='float64')
-        promo_count    = 0
-        holiday_count  = 0
+        promo_count        = 0
+        holiday_count      = 0
+        promo_week_dates   = []
+        holiday_week_dates = []
 
     result = analytics.analyze(
         weekly=weekly,
@@ -232,9 +240,11 @@ def analyze_product(user, product, df=None):
     else:
         result['prior_active']  = False
         result['prior_avg']     = 0
-    result['product']        = product
-    result['lead_time']      = lead_time
-    result['service_level_z'] = z
+    result['product']            = product
+    result['lead_time']          = lead_time
+    result['service_level_z']    = z
+    result['promo_week_dates']   = promo_week_dates
+    result['holiday_week_dates'] = holiday_week_dates
     return result
 
 

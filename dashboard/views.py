@@ -38,14 +38,25 @@ def _selected_product(user, request):
     return qs.first()
 
 
-def _forecast_chart(forecast):
-    """Build x/y series for the SES vs MA forecast chart."""
-    weeks = list(range(1, len(forecast['weeks']) + 1))
+def _forecast_chart(forecast, promo_dates=None, holiday_dates=None):
+    """
+    Build the data payload for the SES vs MA forecast Plotly chart.
+    Uses real date labels on the x-axis when available (CSV products), falling
+    back to integer week numbers for manual products without date history.
+    Includes a 4-week forward projection and optional week-type markers.
+    """
+    week_dates = forecast.get('week_dates', [])
+    x_axis = week_dates if week_dates else list(range(1, len(forecast['weeks']) + 1))
     return {
-        'weeks': weeks,
-        'actual': forecast['weeks'],
-        'ses': forecast['ses_forecast'],
-        'ma': forecast['ma_forecast'],
+        'weeks':        x_axis,
+        'actual':       [round(v, 2) for v in forecast['weeks']],
+        'ses':          [round(v, 2) for v in forecast['ses_forecast']],
+        'ma':           [round(v, 2) for v in forecast['ma_forecast']],
+        'future_dates': forecast.get('future_dates', []),
+        'ses_future':   forecast.get('ses_future', []),
+        'ma_future':    forecast.get('ma_future', []),
+        'promo_dates':  promo_dates or [],
+        'holiday_dates': holiday_dates or [],
     }
 
 
@@ -125,7 +136,11 @@ def index(request):
     if selected:
         analysis = services.analyze_product(request.user, selected)
         context['analysis'] = analysis
-        context['forecast_chart'] = _forecast_chart(analysis['forecast'])
+        context['forecast_chart'] = _forecast_chart(
+            analysis['forecast'],
+            promo_dates=analysis.get('promo_week_dates', []),
+            holiday_dates=analysis.get('holiday_week_dates', []),
+        )
         context['simulation_chart'] = _simulation_chart(analysis['simulation'])
         df = services.load_clean_dataframe(request.user)
         if df is not None and selected.has_csv_history:
@@ -176,7 +191,11 @@ def product_detail(request, pk):
     context = {
         'product': product,
         'analysis': analysis,
-        'forecast_chart': _forecast_chart(analysis['forecast']),
+        'forecast_chart': _forecast_chart(
+            analysis['forecast'],
+            promo_dates=analysis.get('promo_week_dates', []),
+            holiday_dates=analysis.get('holiday_week_dates', []),
+        ),
         'simulation_chart': _simulation_chart(analysis['simulation']),
     }
     df = services.load_clean_dataframe(request.user)
@@ -185,6 +204,18 @@ def product_detail(request, pk):
         context['revenue_chart'] = {
             'weeks': [d.strftime('%Y-%m-%d') for d in rev.index],
             'values': [round(v, 2) for v in rev.tolist()],
+        }
+    # Stock history chart — all transactions for this product, ordered oldest first.
+    txns = list(StockTransaction.objects.filter(
+        product=product, user=request.user,
+    ).order_by('date'))
+    if txns:
+        context['stock_history'] = {
+            'dates':  [t.date.strftime('%Y-%m-%d') for t in txns],
+            'levels': [t.stock_after for t in txns],
+            'types':  [t.transaction_type for t in txns],
+            'rop':    round(analysis['reorder_point'], 1),
+            'ss':     round(analysis['safety_stock'], 1),
         }
     return render(request, 'dashboard/product_detail.html', context)
 
