@@ -191,7 +191,7 @@ def analyze_product(user, product, df=None):
 
     if df is not None and product.has_csv_history:
         df_product = df[df['product_name'] == product.name]
-        weekly, promo_count = analytics.weekly_demand_baseline(df_product)
+        weekly, promo_count, holiday_count = analytics.weekly_demand_baseline(df_product)
         weekly_revenue      = analytics.weekly_revenue_series(df_product)
         prior_active        = False
     else:
@@ -212,6 +212,7 @@ def analyze_product(user, product, df=None):
         weekly         = pd.Series([effective_avg] * 8) if effective_avg else pd.Series(dtype='float64')
         weekly_revenue = pd.Series([effective_avg * product.unit_price] * 8) if effective_avg else pd.Series(dtype='float64')
         promo_count    = 0
+        holiday_count  = 0
 
     result = analytics.analyze(
         weekly=weekly,
@@ -222,6 +223,7 @@ def analyze_product(user, product, df=None):
         z=z,
         order_quantity=order_quantity,
         promo_weeks_count=promo_count,
+        holiday_weeks_count=holiday_count,
     )
     if not product.has_csv_history:
         result['data_weeks']    = data_weeks

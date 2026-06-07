@@ -163,8 +163,15 @@
         {% if a.promo_weeks_count > 0 %}
         <span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
           <i data-lucide="tag" class="h-3 w-3"></i>
-          {{ a.promo_weeks_count }} promotional week{{ a.promo_weeks_count|pluralize }} excluded
+          {{ a.promo_weeks_count }} promo week{{ a.promo_weeks_count|pluralize }} excluded
           {% include "dashboard/_tip.html" with text="Weeks with abnormally high discounting were detected and replaced with the median non-promotional demand before training the forecast. This prevents promotional spikes from inflating your baseline demand estimate and causing over-ordering." %}
+        </span>
+        {% endif %}
+        {% if a.holiday_weeks_count > 0 %}
+        <span class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+          <i data-lucide="calendar-off" class="h-3 w-3"></i>
+          {{ a.holiday_weeks_count }} holiday week{{ a.holiday_weeks_count|pluralize }} excluded
+          {% include "dashboard/_tip.html" with text="Weeks overlapping Malaysian public holidays (e.g. Hari Raya, CNY, Deepavali) were replaced with the median non-holiday demand. Holiday demand spikes are non-recurring and would distort the forecast baseline if left in." %}
         </span>
         {% endif %}
         <span class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">

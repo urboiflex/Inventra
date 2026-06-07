@@ -6,6 +6,19 @@
 {% with a=analysis %}
 <a href="{% url 'products' %}" class="mb-4 inline-flex items-center gap-1 text-sm font-medium text-indigo-600 hover:underline">← Back to Products</a>
 
+<!-- Low-data warning -->
+{% if a.data_weeks < 4 %}
+  <div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 text-blue-800 text-sm flex items-start gap-2">
+    <i data-lucide="info" class="h-4 w-4 mt-0.5 shrink-0"></i>
+    <span>
+      <strong>Limited data:</strong> ROP and Safety Stock are based on
+      <strong>{{ a.data_weeks }} week{% if a.data_weeks != 1 %}s{% endif %}</strong> of sales history.
+      These figures will stabilise after 4+ weeks of recorded sales.
+      {% if a.data_weeks == 0 %}No sales recorded yet — metrics will update as you log sales.{% endif %}
+    </span>
+  </div>
+{% endif %}
+
 <!-- Status banner -->
 {% if a.status == 'Safe' %}
   <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-green-800"><span class="inline-flex items-center gap-1.5 font-semibold"><i data-lucide="check-circle-2" class="h-4 w-4"></i> Stock healthy</span> — {{ product.current_stock|floatformat:0 }} units, above ROP {{ a.reorder_point|floatformat:0 }}.</div>
@@ -28,9 +41,25 @@
 <div class="grid gap-6 lg:grid-cols-2">
   <!-- Forecast -->
   <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-    <div class="mb-3 flex items-center justify-between">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h3 class="font-semibold text-gray-900">SES vs MA Forecast</h3>
-      <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Best α = {{ a.forecast.best_alpha }} · {{ a.forecast.best_method }}</span>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Best α = {{ a.forecast.best_alpha }} · {{ a.forecast.best_method }}</span>
+        {% if a.promo_weeks_count > 0 %}
+        <span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+          <i data-lucide="tag" class="h-3 w-3"></i>
+          {{ a.promo_weeks_count }} promo week{{ a.promo_weeks_count|pluralize }} excluded
+          {% include "dashboard/_tip.html" with text="Weeks with abnormally high discounting were replaced with the median non-promotional demand to prevent forecast bias." %}
+        </span>
+        {% endif %}
+        {% if a.holiday_weeks_count > 0 %}
+        <span class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+          <i data-lucide="calendar-off" class="h-3 w-3"></i>
+          {{ a.holiday_weeks_count }} holiday week{{ a.holiday_weeks_count|pluralize }} excluded
+          {% include "dashboard/_tip.html" with text="Weeks overlapping Malaysian public holidays (Hari Raya, CNY, Deepavali, etc.) were replaced with the median non-holiday demand to prevent forecast bias." %}
+        </span>
+        {% endif %}
+      </div>
     </div>
     <div id="forecast-chart" class="h-72"></div>
     <table class="mt-4 w-full text-sm">
@@ -48,7 +77,7 @@
 
   <!-- Simulation -->
   <div class="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-    <h3 class="mb-3 font-semibold text-gray-900">Simulation: Static vs Forecast ROP</h3>
+    <h3 class="mb-3 font-semibold text-gray-900">Simulation: Naive ROP vs Forecast ROP</h3>
     <div id="simulation-chart" class="h-72"></div>
     <table class="mt-4 w-full text-sm">
       <thead><tr class="text-left text-gray-500">
@@ -57,8 +86,19 @@
         <th><span class="inline-flex items-center gap-0.5">Service Level{% include "dashboard/_tip.html" with text="(Total Weeks − Stockouts) ÷ Total Weeks × 100%. Higher is better." %}</span></th>
       </tr></thead>
       <tbody class="divide-y divide-gray-100">
-        <tr><td class="py-1.5 font-medium">Static (≤10)</td><td>{{ a.simulation.static.stockouts }}</td><td>{{ a.simulation.static.service_level|floatformat:1 }}%</td></tr>
-        <tr class="bg-green-50"><td class="py-1.5 font-medium">Forecast ROP</td><td>{{ a.simulation.dss.stockouts }}</td><td>{{ a.simulation.dss.service_level|floatformat:1 }}%</td></tr>
+        <tr>
+          <td class="py-1.5 font-medium">
+            Naive ROP (no buffer)
+            <span class="ml-1 text-xs font-normal text-gray-400">ROP = {{ a.simulation.naive_rop }}</span>
+          </td>
+          <td>{{ a.simulation.static.stockouts }}</td>
+          <td>{{ a.simulation.static.service_level|floatformat:1 }}%</td>
+        </tr>
+        <tr class="bg-green-50">
+          <td class="py-1.5 font-medium">Forecast ROP (DSS)</td>
+          <td>{{ a.simulation.dss.stockouts }}</td>
+          <td>{{ a.simulation.dss.service_level|floatformat:1 }}%</td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -92,7 +132,7 @@ if (f) Plotly.newPlot('forecast-chart', [
 ], {...L, xaxis:{title:'Week'}, yaxis:{title:'Units'}}, {responsive:true, displayModeBar:false});
 const s = J('simulation-data');
 if (s) Plotly.newPlot('simulation-chart', [
-  {x:s.weeks, y:s.static, name:'Static (≤10)', mode:'lines', line:{color:'#f97316'}},
+  {x:s.weeks, y:s.static, name:'Naive ROP', mode:'lines', line:{color:'#f97316'}},
   {x:s.weeks, y:s.dss, name:'Forecast ROP', mode:'lines', line:{color:'#16a34a'}},
 ], {...L, xaxis:{title:'Week'}, yaxis:{title:'Stock'}}, {responsive:true, displayModeBar:false});
 </script>

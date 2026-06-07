@@ -7,6 +7,7 @@ DSS spec exactly (see CLAUDE.md): CSV cleaning, demand statistics, SES / moving-
 forecasting, safety stock, reorder point, replenishment, simulation and financials.
 """
 import math
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -189,33 +190,128 @@ def detect_promotional_weeks(df_product):
     return weekly_disc > threshold
 
 
+# ---------------------------------------------------------------------------
+# Malaysian Public Holidays — federal + major state holidays, 2023–2026.
+# Islamic and Hindu holidays follow lunar calendars; dates marked (≈) are
+# confirmed official or government-gazette dates.
+# ---------------------------------------------------------------------------
+MY_PUBLIC_HOLIDAYS: frozenset = frozenset([
+    # ── 2023 ──────────────────────────────────────────────────────────────
+    date(2023, 1,  1),              # New Year's Day
+    date(2023, 1, 22), date(2023, 1, 23),  # Chinese New Year (Rabbit)
+    date(2023, 2,  1),              # Federal Territory Day
+    date(2023, 2,  4),              # Thaipusam
+    date(2023, 4, 21), date(2023, 4, 22),  # Hari Raya Aidilfitri
+    date(2023, 5,  1),              # Labour Day
+    date(2023, 5,  4),              # Wesak Day
+    date(2023, 6,  5),              # Yang di-Pertuan Agong Birthday
+    date(2023, 6, 28), date(2023, 6, 29),  # Hari Raya Aidiladha
+    date(2023, 7, 19),              # Awal Muharram
+    date(2023, 8, 31),              # National Day (Merdeka)
+    date(2023, 9, 16),              # Malaysia Day
+    date(2023, 9, 27),              # Prophet Muhammad's Birthday
+    date(2023, 11, 12),             # Deepavali
+    date(2023, 12, 25),             # Christmas
+    # ── 2024 ──────────────────────────────────────────────────────────────
+    date(2024, 1,  1),              # New Year's Day
+    date(2024, 2,  1),              # Federal Territory Day
+    date(2024, 2, 10), date(2024, 2, 11),  # Chinese New Year (Dragon)
+    date(2024, 2, 24),              # Thaipusam
+    date(2024, 4, 10), date(2024, 4, 11),  # Hari Raya Aidilfitri
+    date(2024, 5,  1),              # Labour Day
+    date(2024, 5, 22),              # Wesak Day
+    date(2024, 6,  3),              # Yang di-Pertuan Agong Birthday
+    date(2024, 6, 17),              # Hari Raya Aidiladha
+    date(2024, 7,  7),              # Awal Muharram
+    date(2024, 8, 31),              # National Day
+    date(2024, 9, 16),              # Malaysia Day / Prophet's Birthday (combined)
+    date(2024, 10, 31),             # Deepavali
+    date(2024, 12, 25),             # Christmas
+    # ── 2025 ──────────────────────────────────────────────────────────────
+    date(2025, 1,  1),              # New Year's Day
+    date(2025, 1, 29), date(2025, 1, 30),  # Chinese New Year (Snake)
+    date(2025, 2,  1),              # Federal Territory Day
+    date(2025, 2, 11),              # Thaipusam
+    date(2025, 3, 30), date(2025, 3, 31),  # Hari Raya Aidilfitri
+    date(2025, 5,  1),              # Labour Day
+    date(2025, 5, 12),              # Wesak Day
+    date(2025, 6,  2),              # Yang di-Pertuan Agong Birthday
+    date(2025, 6,  6), date(2025, 6,  7),  # Hari Raya Aidiladha
+    date(2025, 6, 26),              # Awal Muharram
+    date(2025, 8, 31),              # National Day
+    date(2025, 9,  5),              # Prophet Muhammad's Birthday
+    date(2025, 9, 16),              # Malaysia Day
+    date(2025, 10, 20),             # Deepavali
+    date(2025, 12, 25),             # Christmas
+    # ── 2026 (≈ lunar-based dates estimated from Hijri/lunisolar calendars) ─
+    date(2026, 1,  1),              # New Year's Day
+    date(2026, 2,  1),              # Federal Territory Day
+    date(2026, 2, 17), date(2026, 2, 18),  # Chinese New Year (Horse)
+    date(2026, 3, 20), date(2026, 3, 21),  # Hari Raya Aidilfitri (≈)
+    date(2026, 5,  1),              # Labour Day
+    date(2026, 5, 27), date(2026, 5, 28),  # Hari Raya Aidiladha (≈)
+    date(2026, 6,  1),              # Yang di-Pertuan Agong Birthday
+    date(2026, 6, 16),              # Awal Muharram (≈)
+    date(2026, 8, 25),              # Prophet Muhammad's Birthday (≈)
+    date(2026, 8, 31),              # National Day
+    date(2026, 9, 16),              # Malaysia Day
+    date(2026, 11,  8),             # Deepavali (≈)
+    date(2026, 12, 25),             # Christmas
+])
+
+
+def detect_holiday_weeks(weekly_index):
+    """
+    Flag weeks that overlap at least one Malaysian public holiday.
+
+    `weekly_index` is a DatetimeIndex of week-end dates produced by
+    pandas resample('W').  A week is flagged when any of its 7 calendar
+    days (Mon–Sun) falls on a date in MY_PUBLIC_HOLIDAYS.
+
+    Returns a boolean Series indexed by weekly_index.
+    """
+    result = []
+    for week_end in weekly_index:
+        week_start = week_end - pd.Timedelta(days=6)
+        days = pd.date_range(week_start.normalize(), week_end.normalize(), freq='D')
+        result.append(any(d.date() in MY_PUBLIC_HOLIDAYS for d in days))
+    return pd.Series(result, index=weekly_index)
+
+
 def weekly_demand_baseline(df_product):
     """
-    Compute a promotion-adjusted weekly demand series for SES/MA training.
+    Compute a promotion- and holiday-adjusted weekly demand series for SES/MA training.
 
-    Promotional weeks (identified by detect_promotional_weeks) are replaced
-    with the median demand of non-promotional weeks so that forecasting
+    Promotional weeks (high discount) and holiday weeks (Malaysian public holidays)
+    are replaced with the median demand of unaffected weeks so that forecasting
     algorithms are not biased by temporary demand spikes.
 
     Returns:
-        baseline    (pd.Series) – adjusted weekly demand (same index as raw)
-        promo_weeks (int)       – number of weeks replaced
+        baseline      (pd.Series) – adjusted weekly demand (same index as raw)
+        promo_weeks   (int)       – promotional weeks replaced
+        holiday_weeks (int)       – public-holiday weeks replaced
     """
     weekly = weekly_demand_series(df_product)
     if weekly.empty:
-        return weekly, 0
+        return weekly, 0, 0
 
-    promo_mask = detect_promotional_weeks(df_product)
-    promo_aligned = promo_mask.reindex(weekly.index, fill_value=False)
+    promo_mask   = detect_promotional_weeks(df_product)
+    holiday_mask = detect_holiday_weeks(weekly.index)
 
-    promo_count = int(promo_aligned.sum())
-    if promo_count == 0 or not (~promo_aligned).any():
-        return weekly, 0
+    promo_aligned   = promo_mask.reindex(weekly.index, fill_value=False)
+    holiday_aligned = holiday_mask.reindex(weekly.index, fill_value=False)
+    combined_mask   = promo_aligned | holiday_aligned
 
-    non_promo_median = weekly[~promo_aligned].median()
+    promo_count   = int(promo_aligned.sum())
+    holiday_count = int(holiday_aligned.sum())
+
+    if not combined_mask.any() or not (~combined_mask).any():
+        return weekly, promo_count, holiday_count
+
+    baseline_median = weekly[~combined_mask].median()
     baseline = weekly.copy()
-    baseline[promo_aligned] = non_promo_median
-    return baseline, promo_count
+    baseline[combined_mask] = baseline_median
+    return baseline, promo_count, holiday_count
 
 
 # --------------------------------------------------------------------------- #
@@ -518,11 +614,12 @@ def all_product_stats(df):
 
 
 def analyze(weekly, weekly_revenue, current_stock, unit_price, lead_time, z,
-            order_quantity, promo_weeks_count=0):
+            order_quantity, promo_weeks_count=0, holiday_weeks_count=0):
     """
     Full analysis for a product given its weekly demand/revenue history and settings.
     Bundles forecasting, inventory metrics, simulation and financials for the dashboard.
-    promo_weeks_count: promotional weeks excluded from the baseline (informational only).
+    promo_weeks_count:   promotional weeks excluded from the baseline (informational only).
+    holiday_weeks_count: public-holiday weeks excluded from the baseline (informational only).
     """
     avg, std, velocity = demand_stats(weekly)
     ss = safety_stock(z, std, lead_time)
@@ -537,19 +634,20 @@ def analyze(weekly, weekly_revenue, current_stock, unit_price, lead_time, z,
     )
 
     return {
-        'avg_weekly_demand':  avg,
-        'std_weekly_demand':  std,
-        'daily_velocity':     velocity,
-        'safety_stock':       ss,
-        'reorder_point':      rop,
-        'sells_out_in':       sells_out_in(current_stock, velocity),
-        'status':             status,
-        'replenishment_qty':  replenishment_qty(rop, current_stock, ss),
-        'forecast':           comparison,
-        'simulation':         sim,
-        'financials':         fin,
-        'data_weeks':         len(weekly),
-        'promo_weeks_count':  promo_weeks_count,
+        'avg_weekly_demand':    avg,
+        'std_weekly_demand':    std,
+        'daily_velocity':       velocity,
+        'safety_stock':         ss,
+        'reorder_point':        rop,
+        'sells_out_in':         sells_out_in(current_stock, velocity),
+        'status':               status,
+        'replenishment_qty':    replenishment_qty(rop, current_stock, ss),
+        'forecast':             comparison,
+        'simulation':           sim,
+        'financials':           fin,
+        'data_weeks':           len(weekly),
+        'promo_weeks_count':    promo_weeks_count,
+        'holiday_weeks_count':  holiday_weeks_count,
     }
 
 
@@ -630,7 +728,7 @@ def backtest_all_products(df, test_weeks=4):
     """
     results = []
     for name, group in df.groupby('product_name', sort=True):
-        weekly, _ = weekly_demand_baseline(group)
+        weekly, _, _ = weekly_demand_baseline(group)
         bt = backtest_product(weekly, test_weeks)
         if bt is None:
             continue
